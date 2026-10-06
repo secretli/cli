@@ -1,6 +1,7 @@
 // Package sharetest is a fake Secretli server for tests: the slice of the
 // API the client talks to, with the rules the real handlers enforce on
-// parts, tokens and one-time secrets, and tombstones for what is gone.
+// parts, tokens and one-time secrets, tombstones for what is gone, and the
+// short-code transfer relay.
 package sharetest
 
 import (
@@ -34,6 +35,7 @@ type Server struct {
 	secrets  map[string]*secret
 	gone     map[string]map[string]any
 	sessions map[string]string // session token -> public id
+	relay    *relay
 }
 
 type uploadRequest struct {
@@ -71,8 +73,10 @@ func New(partSize int64) *Server {
 		secrets:  map[string]*secret{},
 		gone:     map[string]map[string]any{},
 		sessions: map[string]string{},
+		relay:    newRelay(),
 	}
 	mux := http.NewServeMux()
+	s.relay.register(mux)
 	mux.HandleFunc("POST /api/v1/secrets/uploads", s.startUpload)
 	mux.HandleFunc("PUT /api/v1/secrets/uploads/{sid}/parts/{n}", s.uploadPart)
 	mux.HandleFunc("POST /api/v1/secrets/uploads/{sid}/complete", s.completeUpload)

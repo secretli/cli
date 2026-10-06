@@ -15,9 +15,32 @@ import (
 // code. Files stand in for the pipes, so nothing here is a terminal.
 func runCLI(t *testing.T, stdin string, args ...string) (string, string, int) {
 	t.Helper()
-	dir := t.TempDir()
+	r := startCLI(t, stdin, args...)
+	code := <-r.done
+	return r.stdout(), r.stderr(), code
+}
+
+// running is a command started with startCLI, whose output can be read
+// while it runs.
+type running struct {
+	dir  string
+	done chan int
+}
+
+func (r *running) stdout() string { return r.read("stdout") }
+func (r *running) stderr() string { return r.read("stderr") }
+
+func (r *running) read(name string) string {
+	b, _ := os.ReadFile(filepath.Join(r.dir, name))
+	return string(b)
+}
+
+// startCLI runs Main in the background.
+func startCLI(t *testing.T, stdin string, args ...string) *running {
+	t.Helper()
+	r := &running{dir: t.TempDir(), done: make(chan int, 1)}
 	write := func(name, content string) *os.File {
-		path := filepath.Join(dir, name)
+		path := filepath.Join(r.dir, name)
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -28,15 +51,13 @@ func runCLI(t *testing.T, stdin string, args ...string) (string, string, int) {
 		return f
 	}
 	in, out, errOut := write("stdin", stdin), write("stdout", ""), write("stderr", "")
-	defer in.Close()
-	defer out.Close()
-	defer errOut.Close()
-
-	code := Main(args, in, out, errOut)
-
-	stdout, _ := os.ReadFile(filepath.Join(dir, "stdout"))
-	stderr, _ := os.ReadFile(filepath.Join(dir, "stderr"))
-	return string(stdout), string(stderr), code
+	go func() {
+		defer in.Close()
+		defer out.Close()
+		defer errOut.Close()
+		r.done <- Main(args, in, out, errOut)
+	}()
+	return r
 }
 
 func fakeServer(t *testing.T) *sharetest.Server {

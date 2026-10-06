@@ -11,6 +11,8 @@ secretli share deploy.key notes.pdf   # files; -p adds a password, --reusable le
 secretli open <link>                  # text to stdout, files to the current directory
 secretli status <link>                # what a link points to, without opening it
 secretli delete <owner-link>          # remove a secret for everyone
+secretli send <link>                  # hand a link to another device with a code like 7-acid-rocket
+secretli receive 7-acid-rocket        # open what another device sends with a code
 ```
 
 ## Install
@@ -57,11 +59,17 @@ Every share prints two links: the one to hand out, and the owner link, which can
 
 **Opening.** Text goes to stdout exactly as it was shared. Files are saved to the current directory or to `--out`, and nothing is overwritten unless you pass `--force`; `--stdout` streams a single file instead. Before anything is opened, the command says what the link points to, since opening a one-time secret uses it up. Without an argument the link is read from stdin, or asked for, which keeps it out of your shell history too.
 
+**Handing a link over with a code.** Instead of copying a link to another device, `send` hands it over with a short code like `7-acid-rocket`. On the other device, type the code at the server's `/c` page (`secretli.app/c`) or run `secretli receive 7-acid-rocket`; `secretli share --code` makes a secret and hands it over in one go. The link travels encrypted, and only after the other device has proved it typed the same code; the words never leave the two devices. A code works once and for ten minutes, and a wrong code ends the transfer on both sides. Given an owner link, `send` hands over only the link to hand out. It works both ways with the web app's "Send with a code".
+
+`receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force` and password options, or prints the link with `--link`. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
+
 **Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. For a secret that is gone it says what happened: opened and when, expired, or deleted. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
 
 ## Scripts
 
 stdout carries only the result, so `secretli share … | pbcopy` copies exactly the link; descriptions, the owner link and progress go to stderr. Nothing is asked when stdin is not a terminal; a command that would need an answer fails instead. `--json` prints results and errors as JSON, and `-q` prints only the result.
+
+`send` and `share --code` print the code as their result as soon as there is one, then wait. With `--json` they print two lines: the code (`{"code": …, "code_expires_at": …}`, plus the new secret's fields for `share --code`), then `{"delivered": true}` once the link was handed over, or an error.
 
 The exit code tells a script what happened:
 
@@ -70,8 +78,8 @@ The exit code tells a script what happened:
 | 0 | done |
 | 1 | an error |
 | 2 | wrong usage |
-| 3 | a password is needed, or it is wrong |
-| 4 | the secret is gone: opened, expired or deleted |
+| 3 | a password is needed, or it is wrong; a transfer code did not match |
+| 4 | the secret is gone: opened, expired or deleted; a transfer code is unknown, used, expired or stopped |
 | 5 | the server did not answer, or is limiting requests |
 
 ```bash
@@ -81,7 +89,7 @@ secretli status "$OWNER_LINK" --json | jq -r .state   # live or gone
 
 ## Your own server
 
-New secrets go to `https://secretli.app` unless `--server` or `SECRETLI_SERVER` names another Secretli server. Opening, checking and deleting need no setting, since every link carries its server.
+New secrets go to `https://secretli.app` unless `--server` or `SECRETLI_SERVER` names another Secretli server. Opening, checking, deleting and `send` need no setting, since every link carries its server. A code does not, so `receive` asks the same server as `share`: pass `--server` there too when the code comes from another one.
 
 ## Development
 
@@ -91,8 +99,8 @@ make test    # go test -race ./...
 make lint
 ```
 
-The tests run against a fake server that enforces the real one's rules on uploads, tokens and one-time secrets. Releases are made by pushing a tag such as `v0.2.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
+The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. Releases are made by pushing a tag such as `v0.2.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
 
 ## License
 
-MIT
+MIT. The code words come from the [EFF short word list 2.0](https://www.eff.org/dice) by the Electronic Frontier Foundation, licensed [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/).
