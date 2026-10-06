@@ -1,4 +1,5 @@
-// Package cli is the secretli command: share, open, status and delete.
+// Package cli is the secretli command: share, open, status and delete, and
+// send and receive for handing a link over with a short code.
 //
 // stdout carries the result and nothing else, so `secretli share … | pbcopy`
 // copies exactly the link; everything said to the person goes to stderr
@@ -24,6 +25,7 @@ import (
 
 	"github.com/secretli/cli/internal/share"
 	"github.com/secretli/cli/internal/share/api"
+	"github.com/secretli/format/transfer"
 )
 
 // Version is set at build time; otherwise the module version is used.
@@ -98,7 +100,9 @@ Links from this command open in the web app and the other way round.`,
   secretli share deploy.key notes.pdf  one or more files
   secretli open <link>                 text to stdout, files to the current directory
   secretli status <link>               what a link points to, without opening it
-  secretli delete <owner-link>         remove a secret for everyone`,
+  secretli delete <owner-link>         remove a secret for everyone
+  secretli send <link>                 hand a link to another device with a short code
+  secretli receive 7-acid-rocket       open what another device sends with a code`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version(),
@@ -117,7 +121,7 @@ Links from this command open in the web app and the other way round.`,
 	root.PersistentFlags().BoolVarP(&e.quiet, "quiet", "q", false, "print only the result")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return err })
 
-	root.AddCommand(newShareCmd(e), newOpenCmd(e), newStatusCmd(e), newDeleteCmd(e))
+	root.AddCommand(newShareCmd(e), newOpenCmd(e), newStatusCmd(e), newDeleteCmd(e), newSendCmd(e), newReceiveCmd(e))
 	return root
 }
 
@@ -209,11 +213,13 @@ func exitCode(err error) int {
 	}
 	var gone *share.GoneError
 	var notFound *share.NotFoundError
+	var ended *transfer.EndedError
 	var apiErr *api.Error
 	switch {
-	case errors.Is(err, share.ErrPasswordRequired), errors.Is(err, share.ErrWrongPassword):
+	case errors.Is(err, share.ErrPasswordRequired), errors.Is(err, share.ErrWrongPassword), errors.Is(err, transfer.ErrCodeMismatch):
 		return ExitPassword
-	case errors.As(err, &gone), errors.As(err, &notFound):
+	case errors.As(err, &gone), errors.As(err, &notFound), errors.As(err, &ended),
+		errors.Is(err, share.ErrNoSuchTransfer), errors.Is(err, share.ErrTransferClaimed):
 		return ExitGone
 	case errors.As(err, &apiErr) && (apiErr.Status == 0 || apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests):
 		return ExitServer

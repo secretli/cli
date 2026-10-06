@@ -27,6 +27,7 @@ type shareOptions struct {
 	password     bool
 	qr           bool
 	copyLink     bool
+	code         bool
 }
 
 func newShareCmd(e *env) *cobra.Command {
@@ -43,13 +44,15 @@ terminal, from a prompt, which keeps it out of your shell history. "-" shares
 stdin as a file named by --name.
 
 Links open once unless --reusable is set, and expire after a day unless
---expires says otherwise.`,
+--expires says otherwise. --code hands the link to another device with a
+short code instead of printing it, as secretli send does.`,
 		Example: `  secretli share                          type or paste, then Ctrl-D
   pbpaste | secretli share                text from a pipe
   secretli share -t "hunter2"             text as an argument (lands in shell history)
   secretli share deploy.key notes.pdf     files
   pg_dump db | gzip | secretli share --name db.sql.gz
-  secretli share report.pdf -e 4h --reusable -p --qr`,
+  secretli share report.pdf -e 4h --reusable -p --qr
+  secretli share deploy.key --code         hand it over with a code like 7-acid-rocket`,
 		Args: cobra.ArbitraryArgs,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			return e.share(cmd.Context(), o, args)
@@ -64,12 +67,16 @@ Links open once unless --reusable is set, and expire after a day unless
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVar(&o.qr, "qr", false, "show the link as a QR code too")
 	f.BoolVarP(&o.copyLink, "copy", "c", false, "copy the link to the clipboard")
+	f.BoolVar(&o.code, "code", false, "hand the link to another device with a short code instead of printing it")
 	return cmd
 }
 
 func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	if !share.ValidExpiration(o.expires) {
 		return fmt.Errorf("--expires must be one of %s", strings.Join(share.Expirations, ", "))
+	}
+	if o.code && (o.qr || o.copyLink) {
+		return errors.New("--code hands the link over itself; leave out --qr and --copy")
 	}
 	params := share.Params{Expiration: o.expires, Reusable: o.reusable}
 
@@ -145,7 +152,25 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	if err != nil {
 		return err
 	}
+	if o.code {
+		return e.shareWithCode(ctx, result)
+	}
 	return e.printShared(result, o)
+}
+
+// shareWithCode tells about the new secret and keeps the owner link here,
+// then hands the link to hand out over with a code.
+func (e *env) shareWithCode(ctx context.Context, r *share.Result) error {
+	if e.json {
+		return e.handOver(ctx, r.Link.Recipient(), sharedJSON(r))
+	}
+	summary := fmt.Sprintf("Your secret is ready. %s\n\n%s\n\n  %s\n\n", shareSummary(r), ownerNote, r.Link.String())
+	if e.stdoutTTY && !e.quiet {
+		_, _ = fmt.Fprint(e.stdout, summary)
+	} else {
+		e.note("%s", summary)
+	}
+	return e.handOver(ctx, r.Link.Recipient(), nil)
 }
 
 func (e *env) readStdin() ([]byte, error) {
@@ -202,31 +227,10 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 		}
 	}
 	if e.json {
-		opens := "once"
-		if r.Reusable {
-			opens = "until_expiry"
-		}
-		out := map[string]any{
-			"link":       link,
-			"owner_link": r.Link.String(),
-			"expires_at": r.ExpiresAt.UTC(),
-			"opens":      opens,
-			"password":   r.PasswordProtected,
-			"kind":       r.Kind,
-			"size":       r.Size,
-		}
-		if r.Kind == share.KindFiles {
-			out["files"] = r.Names
-		}
-		return e.emitJSON(out)
+		return e.emitJSON(sharedJSON(r))
 	}
 
-	opens := "Opens once"
-	if r.Reusable {
-		opens = "Opens until it expires"
-	}
-	summary := fmt.Sprintf("%s, expires %s.", opens, formatMoment(r.ExpiresAt, time.Now()))
-	const ownerNote = "Owner link, keep it to yourself: it can delete the secret and shows whether it was opened."
+	summary := shareSummary(r)
 	if e.quiet || !e.stdoutTTY {
 		_, _ = fmt.Fprintln(e.stdout, link)
 		if !e.quiet {
@@ -236,4 +240,36 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 	}
 	_, _ = fmt.Fprintf(e.stdout, "Your link is ready. %s\n\n  %s\n\n%s\n\n  %s\n", summary, link, ownerNote, r.Link.String())
 	return nil
+}
+
+const ownerNote = "Owner link, keep it to yourself: it can delete the secret and shows whether it was opened."
+
+// shareSummary says how often a new secret opens and when it expires.
+func shareSummary(r *share.Result) string {
+	opens := "Opens once"
+	if r.Reusable {
+		opens = "Opens until it expires"
+	}
+	return fmt.Sprintf("%s, expires %s.", opens, formatMoment(r.ExpiresAt, time.Now()))
+}
+
+// sharedJSON is a new secret as --json prints it.
+func sharedJSON(r *share.Result) map[string]any {
+	opens := "once"
+	if r.Reusable {
+		opens = "until_expiry"
+	}
+	out := map[string]any{
+		"link":       r.Link.Recipient().String(),
+		"owner_link": r.Link.String(),
+		"expires_at": r.ExpiresAt.UTC(),
+		"opens":      opens,
+		"password":   r.PasswordProtected,
+		"kind":       r.Kind,
+		"size":       r.Size,
+	}
+	if r.Kind == share.KindFiles {
+		out["files"] = r.Names
+	}
+	return out
 }

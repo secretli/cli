@@ -46,13 +46,18 @@ which keeps it out of your shell history.`,
 			return e.open(cmd.Context(), o, args)
 		}),
 	}
+	addOpenFlags(cmd, &o)
+	return cmd
+}
+
+// addOpenFlags adds what opening a secret takes; receive opens one too.
+func addOpenFlags(cmd *cobra.Command, o *openOptions) {
 	f := cmd.Flags()
 	f.StringVarP(&o.out, "out", "o", ".", "the directory files are saved to")
 	f.BoolVar(&o.toStdout, "stdout", false, "write a single file to stdout instead of saving it")
 	f.BoolVar(&o.force, "force", false, "overwrite files that already exist")
 	f.BoolVarP(&o.password, "password", "p", false, "the secret has a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
-	return cmd
 }
 
 // describedGone carries the owner's or the recipient's version of what became
@@ -78,6 +83,11 @@ func (e *env) open(ctx context.Context, o openOptions, args []string) error {
 	if err != nil {
 		return err
 	}
+	return e.openLink(ctx, o, link)
+}
+
+// openLink describes the secret behind a link, then opens it.
+func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) error {
 	c := e.client(link.Origin)
 	now := time.Now()
 	info, err := share.Inspect(ctx, c, link)
