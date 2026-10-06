@@ -22,8 +22,8 @@ VERSION=v0.2.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or am
 BASE="https://github.com/secretli/cli/releases/download/${VERSION}"
 curl -fsSLO "${BASE}/secretli_${VERSION}_${OS}_${ARCH}.tar.gz"
 gh attestation verify "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" --repo secretli/cli
-tar -xzf "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" secretli
-sudo install secretli /usr/local/bin/secretli
+mkdir -p secretli-cli && tar -xzf "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" -C secretli-cli
+sudo install secretli-cli/secretli /usr/local/bin/secretli
 ```
 
 The verification step checks that the archive was built by this repository's release workflow from that tag; it needs the [GitHub CLI](https://cli.github.com/), logged in. Without it, compare against the release's `checksums.txt` instead:
