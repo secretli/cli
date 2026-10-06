@@ -1,0 +1,98 @@
+name: Release
+
+# A tag such as v0.2.0 releases the command: binaries for macOS, Linux and
+# Windows, their checksums, and a GitHub build attestation for each file.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          version="$GITHUB_REF_NAME"
+          name="secretli_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "build/${name}" dist
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/secretli/cli/internal/cli.Version=${version}" \
+            -o "build/${name}/secretli${ext}" ./cmd/secretli
+          cp LICENSE README.md "build/${name}/"
+          if [ "$GOOS" = "windows" ]; then
+            (cd "build/${name}" && zip -q "../../dist/${name}.zip" ./*)
+          else
+            tar -C "build/${name}" -czf "dist/${name}.tar.gz" .
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the attestations
+      attestations: write # store the attestations
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > checksums.txt
+
+      - name: Attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$GITHUB_REF_NAME"
+          cat > notes.md <<EOF
+          The \`secretli\` command, ${version}. It shares and opens secrets with the same encryption and the same links as the web app.
+
+          Download the archive for your system, unpack it, and put \`secretli\` on your PATH. Every file carries a build attestation from this repository's release workflow; to check a download:
+
+          \`\`\`bash
+          gh attestation verify secretli_${version}_darwin_arm64.tar.gz --repo ${GITHUB_REPOSITORY}
+          \`\`\`
+
+          With a Go toolchain: \`go install github.com/secretli/cli/cmd/secretli@${version}\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "secretli ${version}" --notes-file notes.md --generate-notes dist/*
