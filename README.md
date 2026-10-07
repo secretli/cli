@@ -20,7 +20,7 @@ secretli receive 7-acid-rocket        # open what another device sends with a co
 Binaries for macOS, Linux and Windows are on the [releases page](https://github.com/secretli/cli/releases). Pick the archive for your system, check it, and put the binary on your PATH:
 
 ```bash
-VERSION=v0.3.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
+VERSION=v0.4.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
 BASE="https://github.com/secretli/cli/releases/download/${VERSION}"
 curl -fsSLO "${BASE}/secretli_${VERSION}_${OS}_${ARCH}.tar.gz"
 gh attestation verify "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" --repo secretli/cli
@@ -99,7 +99,7 @@ make test    # go test -race ./...
 make lint
 ```
 
-The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. Releases are made by pushing a tag such as `v0.3.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
+The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. Releases are made by pushing a tag such as `v0.4.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
 
 ## License
 

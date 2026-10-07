@@ -1,6 +1,6 @@
 name: Release
 
-# A tag such as v0.3.0 releases the command: binaries for macOS, Linux and
+# A tag such as v0.4.0 releases the command: binaries for macOS, Linux and
 # Windows, their checksums, and a GitHub build attestation for each file.
 on:
   push:
