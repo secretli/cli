@@ -55,8 +55,16 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # The whole of Secretli with this release's client: the server, the web
+  # app and the browser, behind a gateway like production's (secretli/e2e).
+  # Nothing is released unless it passes.
+  whole-setup:
+    uses: secretli/e2e/.github/workflows/whole-setup.yml@main
+    with:
+      cli_ref: ${{ github.sha }}
+
   release:
-    needs: build
+    needs: [build, whole-setup]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

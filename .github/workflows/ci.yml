@@ -89,6 +89,14 @@ jobs:
         if: failure()
         run: docker logs secretli-server
 
+  # The whole of Secretli with this change's client: the server, the web app
+  # and the browser, behind a gateway like production's (secretli/e2e), so a
+  # problem shows up here rather than when a release is tagged.
+  whole-setup:
+    uses: secretli/e2e/.github/workflows/whole-setup.yml@main
+    with:
+      cli_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
   # Every system a release ships for has to build on every change, so a
   # break on one of them shows up here and not on release day.
   build:
