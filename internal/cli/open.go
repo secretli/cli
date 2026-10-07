@@ -79,7 +79,7 @@ func describeGone(err error, owner bool) error {
 }
 
 func (e *env) open(ctx context.Context, o openOptions, args []string) error {
-	link, err := e.linkArg(args)
+	link, err := e.linkArg(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 	e.say("%s\n", describeInfo(info, link.IsOwner(), now))
 
 	source := passwordSource{flag: o.password, file: o.passwordFile}
-	password, err := source.resolve(e, info.PasswordProtected, false)
+	password, err := source.resolve(ctx, e, info.PasswordProtected, false)
 	if err != nil {
 		if info.PasswordProtected {
 			return fmt.Errorf("%w: %w", share.ErrPasswordRequired, err)
@@ -118,7 +118,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		if errors.Is(err, share.ErrWrongPassword) && source.file == "" && os.Getenv("SECRETLI_PASSWORD") == "" && attempt < 3 {
 			if t, terr := e.terminal(); terr == nil {
 				e.note("Wrong password. Try again.\n")
-				password, err = t.askSecret("Password: ")
+				password, err = t.askSecret(ctx, "Password: ")
 				t.close()
 				if err == nil && password != "" {
 					continue
@@ -130,13 +130,16 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 }
 
 // linkArg takes the link from the arguments, from stdin, or from a prompt.
-func (e *env) linkArg(args []string) (share.Link, error) {
+func (e *env) linkArg(ctx context.Context, args []string) (share.Link, error) {
 	raw := ""
 	switch {
 	case len(args) == 1:
 		raw = args[0]
 	case !e.stdinTTY:
-		line, err := bufio.NewReader(e.stdin).ReadString('\n')
+		line, err := interruptible(ctx, func() (string, error) { return bufio.NewReader(e.stdin).ReadString('\n') })
+		if ctx.Err() != nil {
+			return share.Link{}, ctx.Err()
+		}
 		if err != nil && (!errors.Is(err, io.EOF) || line == "") {
 			return share.Link{}, errors.New("no link given, and nothing on stdin")
 		}
@@ -147,7 +150,7 @@ func (e *env) linkArg(args []string) (share.Link, error) {
 			return share.Link{}, errors.New("no link given")
 		}
 		defer t.close()
-		if raw, err = t.askLine("Paste the link: "); err != nil {
+		if raw, err = t.askLine(ctx, "Paste the link: "); err != nil {
 			return share.Link{}, err
 		}
 	}

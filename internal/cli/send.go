@@ -34,14 +34,15 @@ argument the link is read from stdin, or asked for at a terminal.`,
   secretli share notes.txt -q | secretli send`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: run(func(cmd *cobra.Command, args []string) error {
-			link, err := e.linkArg(args)
+			ctx := cmd.Context()
+			link, err := e.linkArg(ctx, args)
 			if err != nil {
 				return err
 			}
 			if link.IsOwner() {
 				e.note("Sending the link to hand out; the owner link stays here.\n")
 			}
-			return e.handOver(cmd.Context(), link.Recipient(), nil)
+			return e.handOver(ctx, link.Recipient(), nil)
 		}),
 	}
 }
