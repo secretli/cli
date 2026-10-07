@@ -17,7 +17,15 @@ secretli receive 7-acid-rocket        # open what another device sends with a co
 
 ## Install
 
-Binaries for macOS, Linux and Windows are on the [releases page](https://github.com/secretli/cli/releases). Pick the archive for your system, check it, and put the binary on your PATH:
+With [Homebrew](https://brew.sh), on macOS or Linux:
+
+```bash
+brew install secretli/tap/secretli
+```
+
+`brew upgrade` picks up new releases, and shell completion for bash, zsh and fish comes along. The formula installs the same archives as below, which Homebrew checks against their SHA-256.
+
+Without Homebrew, binaries for macOS, Linux and Windows are on the [releases page](https://github.com/secretli/cli/releases). Pick the archive for your system, check it, and put the binary on your PATH:
 
 ```bash
 VERSION=v0.5.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
@@ -43,7 +51,7 @@ With a Go toolchain:
 go install github.com/secretli/cli/cmd/secretli@latest
 ```
 
-For shell completion, `secretli completion zsh --help` (or `bash`, `fish`, `powershell`) shows the line to add to your shell's startup file. It completes commands, flags and `-e`'s lifetimes, and offers no files where a link or a code goes.
+For shell completion without Homebrew, `secretli completion zsh --help` (or `bash`, `fish`, `powershell`) shows the line to add to your shell's startup file. It completes commands, flags and `-e`'s lifetimes, and offers no files where a link or a code goes.
 
 ## Use
 
