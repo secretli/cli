@@ -28,7 +28,7 @@ with the part after "!", can do this. The link stops working right away.`,
 }
 
 func (e *env) delete(ctx context.Context, args []string, yes bool) error {
-	link, err := e.linkArg(args)
+	link, err := e.linkArg(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,7 @@ func (e *env) delete(ctx context.Context, args []string, yes bool) error {
 		if err != nil {
 			return errors.New("use --yes to delete without being asked")
 		}
-		ok, err := t.confirm("Delete it for everyone? The link stops working right away.")
+		ok, err := t.confirm(ctx, "Delete it for everyone? The link stops working right away.")
 		t.close()
 		if err != nil {
 			return err

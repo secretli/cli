@@ -67,15 +67,26 @@ func (e *runError) Unwrap() error { return e.err }
 
 // Main runs the command line and returns the exit code.
 func Main(args []string, stdin, stdout, stderr *os.File) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// The first Ctrl-C ends the command cleanly: prompts give up, uploads
+	// and transfers are released. Should anything not notice it, the
+	// second one ends the process the default way.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return execute(ctx, args, stdin, stdout, stderr)
+}
+
+// execute runs the command line until it is done or ctx is.
+func execute(ctx context.Context, args []string, stdin, stdout, stderr *os.File) int {
 	e := &env{
 		stdin: stdin, stdout: stdout, stderr: stderr,
 		stdinTTY:  term.IsTerminal(int(stdin.Fd())),
 		stdoutTTY: term.IsTerminal(int(stdout.Fd())),
 		stderrTTY: term.IsTerminal(int(stderr.Fd())),
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	root := newRoot(e)
 	root.SetArgs(args)
 	root.SetOut(stdout)

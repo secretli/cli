@@ -48,7 +48,7 @@ Without an argument the code is read from stdin, or asked for at a terminal.`,
 }
 
 func (e *env) receive(ctx context.Context, o receiveOptions, args []string) error {
-	code, err := e.codeArg(args)
+	code, err := e.codeArg(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -80,12 +80,15 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 
 // codeArg takes the code from the arguments, which may be its parts, from
 // stdin, or from a prompt.
-func (e *env) codeArg(args []string) (transfer.Code, error) {
+func (e *env) codeArg(ctx context.Context, args []string) (transfer.Code, error) {
 	raw := strings.Join(args, " ")
 	switch {
 	case raw != "":
 	case !e.stdinTTY:
-		line, err := bufio.NewReader(e.stdin).ReadString('\n')
+		line, err := interruptible(ctx, func() (string, error) { return bufio.NewReader(e.stdin).ReadString('\n') })
+		if ctx.Err() != nil {
+			return transfer.Code{}, ctx.Err()
+		}
 		if err != nil && (!errors.Is(err, io.EOF) || line == "") {
 			return transfer.Code{}, errors.New("no code given, and nothing on stdin")
 		}
@@ -96,7 +99,7 @@ func (e *env) codeArg(args []string) (transfer.Code, error) {
 			return transfer.Code{}, errors.New("no code given")
 		}
 		defer t.close()
-		if raw, err = t.askLine("Code: "); err != nil {
+		if raw, err = t.askLine(ctx, "Code: "); err != nil {
 			return transfer.Code{}, err
 		}
 	}

@@ -37,7 +37,7 @@ type exitWith struct{ code int }
 func (x *exitWith) Error() string { return "" }
 
 func (e *env) status(ctx context.Context, args []string) error {
-	link, err := e.linkArg(args)
+	link, err := e.linkArg(ctx, args)
 	if err != nil {
 		return err
 	}

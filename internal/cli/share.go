@@ -88,7 +88,7 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	}()
 	for _, arg := range args {
 		if arg == "-" {
-			data, err := e.readStdin()
+			data, err := e.readStdin(ctx)
 			if err != nil {
 				return err
 			}
@@ -114,20 +114,20 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 		case o.text != "":
 			params.Text = []byte(o.text)
 		case o.name != "":
-			data, err := e.readStdin()
+			data, err := e.readStdin(ctx)
 			if err != nil {
 				return err
 			}
 			params.Files = []bundle.Source{memorySource(o.name, data)}
 		case !e.stdinTTY:
-			data, err := e.readStdin()
+			data, err := e.readStdin(ctx)
 			if err != nil {
 				return err
 			}
 			params.Text = data
 		default:
 			e.note("Type or paste the secret, then press Ctrl-D on an empty line.\n")
-			data, err := e.readStdin()
+			data, err := e.readStdin(ctx)
 			if err != nil {
 				return err
 			}
@@ -139,7 +139,7 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 		return share.ErrNothingToShare
 	}
 
-	password, err := passwordSource{flag: o.password, file: o.passwordFile}.resolve(e, false, true)
+	password, err := passwordSource{flag: o.password, file: o.passwordFile}.resolve(ctx, e, false, true)
 	if err != nil {
 		return err
 	}
@@ -173,8 +173,15 @@ func (e *env) shareWithCode(ctx context.Context, r *share.Result) error {
 	return e.handOver(ctx, r.Link.Recipient(), nil)
 }
 
-func (e *env) readStdin() ([]byte, error) {
-	data, err := io.ReadAll(e.stdin)
+func (e *env) readStdin(ctx context.Context) ([]byte, error) {
+	data, err := interruptible(ctx, func() ([]byte, error) { return io.ReadAll(e.stdin) })
+	if ctx.Err() != nil {
+		if e.stdinTTY {
+			// Typing stopped mid-line; what follows goes below it.
+			_, _ = fmt.Fprintln(e.stderr)
+		}
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read stdin: %w", err)
 	}
