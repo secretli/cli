@@ -99,7 +99,21 @@ make test    # go test -race ./...
 make lint
 ```
 
-The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. Releases are made by pushing a tag such as `v0.4.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
+The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. CI runs the same tests against the real server too, the latest published image, so the fake cannot drift from it; checks that look inside the fake are skipped there. To do that locally, start a server with raised rate limits (the tests send many requests from one address) and point the tests at it:
+
+```bash
+# Postgres and SeaweedFS from a checkout of secretli/server, then the server image
+docker compose -f ../server/docker/docker-compose.yml up -d postgres seaweedfs createbucket
+docker run -d --name secretli-test --network host -e RATE_LIMIT_MULTIPLIER=100 \
+  -e DATABASE_URL='postgres://secretli:secretli@localhost:5432/secretli?sslmode=disable' \
+  -e S3_ENDPOINT=localhost:8333 -e S3_ACCESS_KEY=admin -e S3_SECRET_KEY=admin -e S3_USE_SSL=false \
+  ghcr.io/secretli/server:main
+SECRETLI_TEST_SERVER=http://localhost:8080 make test
+```
+
+On macOS, where `--network host` does not reach the host, run the server on the compose network instead and publish its port.
+
+Releases are made by pushing a tag such as `v0.4.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
 
 ## License
 

@@ -60,11 +60,11 @@ func startCLI(t *testing.T, stdin string, args ...string) *running {
 	return r
 }
 
-func fakeServer(t *testing.T) *sharetest.Server {
+// fakeServer is the fake server, or the real one named by
+// SECRETLI_TEST_SERVER.
+func fakeServer(t *testing.T) *sharetest.Target {
 	t.Helper()
-	srv := sharetest.New(32 * 1024 * 1024)
-	t.Cleanup(srv.Close)
-	return srv
+	return sharetest.Start(t, 32*1024*1024)
 }
 
 func TestShareOpenStatusDeleteFromThePipe(t *testing.T) {

@@ -101,8 +101,10 @@ func TestReceiveNeverLosesTheLink(t *testing.T) {
 	if code != ExitError || !strings.Contains(stderr, "use --yes to open it anyway, or --link") {
 		t.Errorf("without a terminal: exit %d, stderr %q", code, stderr)
 	}
-	if states := srv.Transfers(); len(states) != 1 || states[0].Claimed {
-		t.Errorf("the code was taken: %+v", states)
+	if fake := srv.Fake(); fake != nil {
+		if states := fake.Transfers(); len(states) != 1 || states[0].Claimed {
+			t.Errorf("the code was taken: %+v", states)
+		}
 	}
 
 	// Asked and declined: the link is printed, since the code is used up now.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestSendAndReceiveWithACode(t *testing.T) {
 	// Given the owner link, send hands over only the link to hand out.
 	sender := startCLI(t, "", "send", ownerLink)
 	transferCode := firstLine(t, sender)
-	if !strings.HasPrefix(transferCode, "1-") || strings.Count(transferCode, "-") != 2 {
+	if !regexp.MustCompile(`^[1-9][0-9]{0,2}-[a-z]+-[a-z]+$`).MatchString(transferCode) {
 		t.Fatalf("code = %q", transferCode)
 	}
 	if !strings.Contains(sender.stderr(), "the owner link stays here") || !strings.Contains(sender.stderr(), "/c and type the code") {
