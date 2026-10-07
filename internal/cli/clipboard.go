@@ -77,8 +77,7 @@ func (c systemClipboard) Copy(text string) error {
 	if err != nil {
 		return err
 	}
-	_, err = runClipTool(t.copy, text)
-	return err
+	return runClipTool(t.copy, text)
 }
 
 func (c systemClipboard) Paste() (string, error) {
@@ -86,7 +85,7 @@ func (c systemClipboard) Paste() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return runClipTool(t.paste, "")
+	return readClipTool(t.paste)
 }
 
 func (c systemClipboard) Clear() error {
@@ -95,17 +94,26 @@ func (c systemClipboard) Clear() error {
 		return err
 	}
 	if len(t.clear) == 0 {
-		_, err = runClipTool(t.copy, "")
-		return err
+		return runClipTool(t.copy, "")
 	}
-	_, err = runClipTool(t.clear, "")
-	return err
+	return runClipTool(t.clear, "")
 }
 
-func runClipTool(args []string, input string) (string, error) {
+// runClipTool runs a tool that copies or clears. Its output is not read:
+// xclip and wl-copy stay behind to serve the clipboard, and waiting for
+// their output to end would wait for them.
+func runClipTool(args []string, input string) error {
 	cmd := exec.CommandContext(context.Background(), args[0], args[1:]...) //nolint:gosec // fixed list of known clipboard tools
 	cmd.Stdin = strings.NewReader(input)
-	out, err := cmd.Output()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w", args[0], err)
+	}
+	return nil
+}
+
+// readClipTool runs a tool that pastes, and returns what it printed.
+func readClipTool(args []string) (string, error) {
+	out, err := exec.CommandContext(context.Background(), args[0], args[1:]...).Output() //nolint:gosec // fixed list of known clipboard tools
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", args[0], err)
 	}
