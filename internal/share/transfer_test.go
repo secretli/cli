@@ -37,7 +37,7 @@ func TestOriginIsSpelledLikeABrowser(t *testing.T) {
 
 // sendInBackground starts SendWithCode and hands back the code once the
 // transfer is open, and the send's result when it ends.
-func sendInBackground(ctx context.Context, t *testing.T, srv *sharetest.Server, link string) (transfer.Code, <-chan error) {
+func sendInBackground(ctx context.Context, t *testing.T, srv *sharetest.Target, link string) (transfer.Code, <-chan error) {
 	t.Helper()
 	c := clientFor(srv)
 	codes := make(chan transfer.Code, 1)
@@ -61,7 +61,7 @@ func sendInBackground(ctx context.Context, t *testing.T, srv *sharetest.Server, 
 	return transfer.Code{}, nil
 }
 
-func newRelayServer(t *testing.T) *sharetest.Server {
+func newRelayServer(t *testing.T) *sharetest.Target {
 	t.Helper()
 	_, srv := newClient(t, 32*1024*1024)
 	return srv
@@ -70,7 +70,7 @@ func newRelayServer(t *testing.T) *sharetest.Server {
 func TestHandsALinkOverWithACode(t *testing.T) {
 	srv := newRelayServer(t)
 	code, sent := sendInBackground(context.Background(), t, srv, transferLink)
-	if code.Nameplate != 1 {
+	if code.Nameplate < 1 || code.Nameplate > 999 {
 		t.Errorf("nameplate = %d", code.Nameplate)
 	}
 
@@ -85,8 +85,10 @@ func TestHandsALinkOverWithACode(t *testing.T) {
 	if err := <-sent; err != nil {
 		t.Errorf("send: %v", err)
 	}
-	if states := srv.Transfers(); len(states) != 1 || states[0].Closed != "done" || !states[0].Delivered {
-		t.Errorf("transfers = %+v", states)
+	if fake := srv.Fake(); fake != nil {
+		if states := fake.Transfers(); len(states) != 1 || states[0].Closed != "done" || !states[0].Delivered {
+			t.Errorf("transfers = %+v", states)
+		}
 	}
 }
 
@@ -108,8 +110,10 @@ func TestAWrongCodeDeliversNothing(t *testing.T) {
 	if err := <-sent; !errors.Is(err, transfer.ErrCodeMismatch) {
 		t.Errorf("send: %v", err)
 	}
-	if states := srv.Transfers(); len(states) != 1 || states[0].Closed != "mismatch" || states[0].Delivered {
-		t.Errorf("transfers = %+v", states)
+	if fake := srv.Fake(); fake != nil {
+		if states := fake.Transfers(); len(states) != 1 || states[0].Closed != "mismatch" || states[0].Delivered {
+			t.Errorf("transfers = %+v", states)
+		}
 	}
 }
 
@@ -117,7 +121,7 @@ func TestANameplateIsClaimedOnce(t *testing.T) {
 	srv := newRelayServer(t)
 	c := clientFor(srv)
 
-	if _, err := share.ReceiveWithCode(context.Background(), c, transfer.Code{Nameplate: 42, Words: [2]string{"acid", "rocket"}}); !errors.Is(err, share.ErrNoSuchTransfer) {
+	if _, err := share.ReceiveWithCode(context.Background(), c, transfer.Code{Nameplate: 999, Words: [2]string{"acid", "rocket"}}); !errors.Is(err, share.ErrNoSuchTransfer) {
 		t.Errorf("unknown nameplate: %v", err)
 	}
 
@@ -142,8 +146,10 @@ func TestAnInterruptedSenderReleasesTheCode(t *testing.T) {
 	if err := <-sent; !errors.Is(err, context.Canceled) {
 		t.Errorf("send: %v", err)
 	}
-	if states := srv.Transfers(); len(states) != 1 || states[0].Closed != "cancelled" {
-		t.Errorf("transfers = %+v", states)
+	if fake := srv.Fake(); fake != nil {
+		if states := fake.Transfers(); len(states) != 1 || states[0].Closed != "cancelled" {
+			t.Errorf("transfers = %+v", states)
+		}
 	}
 	c := clientFor(srv)
 	if _, err := share.ReceiveWithCode(context.Background(), c, code); !errors.Is(err, share.ErrNoSuchTransfer) {
@@ -171,14 +177,17 @@ func TestTheReceiverHearsThatTheSenderStopped(t *testing.T) {
 		_, err := share.ReceiveWithCode(context.Background(), c, transfer.Code{Nameplate: opened.Nameplate, Words: party.Words})
 		received <- err
 	}()
-	for deadline := time.Now().Add(10 * time.Second); ; {
-		if states := srv.Transfers(); len(states) == 1 && states[0].Answered {
+	// Wait the way the sender does: through the relay, until the answer is there.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	for {
+		answer, err := c.AwaitTransferAnswer(ctx, id, opened.SenderToken)
+		if err != nil {
+			t.Fatalf("never answered: %v", err)
+		}
+		if answer != nil {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("never answered")
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if err := c.CloseTransfer(context.Background(), id, opened.SenderToken, "cancelled"); err != nil {
 		t.Fatal(err)
@@ -190,7 +199,7 @@ func TestTheReceiverHearsThatTheSenderStopped(t *testing.T) {
 	}
 }
 
-func clientFor(srv *sharetest.Server) *api.Client { return api.New(srv.URL) }
+func clientFor(srv *sharetest.Target) *api.Client { return api.New(srv.URL) }
 
 func mustOrigin(t *testing.T, server string) string {
 	t.Helper()

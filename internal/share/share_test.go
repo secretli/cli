@@ -35,10 +35,11 @@ type nopCloser struct{ io.Writer }
 
 func (nopCloser) Close() error { return nil }
 
-func newClient(t *testing.T, partSize int64) (*api.Client, *sharetest.Server) {
+// newClient talks to the fake server, or to the real one named by
+// SECRETLI_TEST_SERVER.
+func newClient(t *testing.T, partSize int64) (*api.Client, *sharetest.Target) {
 	t.Helper()
-	srv := sharetest.New(partSize)
-	t.Cleanup(srv.Close)
+	srv := sharetest.Start(t, partSize)
 	return api.New(srv.URL), srv
 }
 
@@ -117,8 +118,8 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	if progressCalls < 2 || lastUploaded != lastTotal {
 		t.Errorf("progress: %d calls, ended at %d of %d", progressCalls, lastUploaded, lastTotal)
 	}
-	if parts := srv.PartsUploaded(); parts != 3 {
-		t.Errorf("parts uploaded = %d, want 3", parts)
+	if fake := srv.Fake(); fake != nil && fake.PartsUploaded() != 3 {
+		t.Errorf("parts uploaded = %d, want 3", fake.PartsUploaded())
 	}
 
 	recipient := result.Link.Recipient()
@@ -174,7 +175,7 @@ func TestDeleteNeedsTheOwnerLinkAndLeavesAStory(t *testing.T) {
 	if err := share.Delete(ctx, c, result.Link); err != nil {
 		t.Fatal(err)
 	}
-	if srv.Secrets() != 0 {
+	if fake := srv.Fake(); fake != nil && fake.Secrets() != 0 {
 		t.Error("the secret is still on the server")
 	}
 	_, err = share.Inspect(ctx, c, result.Link)

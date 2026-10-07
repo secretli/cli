@@ -40,6 +40,55 @@ jobs:
 
       - run: go test -race -cover ./...
 
+  # The same tests against a real server, the latest published image, so
+  # the fake in internal/share/sharetest cannot drift from what it imitates.
+  # Checks that look inside the fake are skipped there.
+  real-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The server repository knows what the server needs to run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: secretli/server
+          path: server
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Start a Secretli server
+        run: |
+          docker compose -f server/docker/docker-compose.yml up -d postgres seaweedfs createbucket
+          docker compose -f server/docker/docker-compose.yml wait createbucket
+          # Raised rate limits: the tests send many requests from one address.
+          docker run -d --name secretli-server --network host \
+            -e DATABASE_URL='postgres://secretli:secretli@localhost:5432/secretli?sslmode=disable' \
+            -e S3_ENDPOINT=localhost:8333 -e S3_ACCESS_KEY=admin -e S3_SECRET_KEY=admin -e S3_USE_SSL=false \
+            -e SERVER_PORT=8080 -e RATE_LIMIT_MULTIPLIER=100 \
+            ghcr.io/secretli/server:main
+          for i in {1..60}; do
+            if curl -fsS -o /dev/null http://localhost:8080/api/v1/health/ready; then
+              echo "server $(curl -sS http://localhost:8080/api/v1/version)"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs secretli-server
+          exit 1
+
+      - name: Tests against the real server
+        env:
+          SECRETLI_TEST_SERVER: http://localhost:8080
+        run: go test -race -count=1 ./...
+
+      - name: Server logs
+        if: failure()
+        run: docker logs secretli-server
+
   # Every system a release ships for has to build on every change, so a
   # break on one of them shows up here and not on release day.
   build:
