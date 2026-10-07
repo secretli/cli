@@ -132,7 +132,7 @@ Links from this command open in the web app and the other way round.`,
 	root.PersistentFlags().BoolVarP(&e.quiet, "quiet", "q", false, "print only the result")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return err })
 
-	root.AddCommand(newShareCmd(e), newOpenCmd(e), newStatusCmd(e), newDeleteCmd(e), newSendCmd(e), newReceiveCmd(e))
+	root.AddCommand(newShareCmd(e), newOpenCmd(e), newStatusCmd(e), newDeleteCmd(e), newSendCmd(e), newReceiveCmd(e), newClearClipboardCmd())
 	return root
 }
 

@@ -18,7 +18,8 @@ func newDeleteCmd(e *env) *cobra.Command {
 with the part after "!", can do this. The link stops working right away.`,
 		Example: `  secretli delete 'https://secretli.app/s#…!…'
   secretli delete "$OWNER_LINK" --yes`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			return e.delete(cmd.Context(), args, yes)
 		}),

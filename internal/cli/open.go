@@ -24,10 +24,15 @@ type openOptions struct {
 	password     bool
 	passwordFile string
 	yes          bool
+	copy         bool
 }
 
 // errNotOpened is a one-time secret the person chose not to open yet.
 var errNotOpened = errors.New("not opened")
+
+// errCopyIsForText is --copy on a secret that holds files, found out
+// before it is opened.
+var errCopyIsForText = errors.New("--copy is for text, and this secret holds files; leave out --copy to save them")
 
 func newOpenCmd(e *env) *cobra.Command {
 	var o openOptions
@@ -38,6 +43,10 @@ func newOpenCmd(e *env) *cobra.Command {
 saved to the current directory, or to --out, and never overwrite anything
 unless --force is given.
 
+--copy puts text on the clipboard instead, without its final line break,
+so it never shows in the terminal or its scrollback. The clipboard is
+cleared 45 seconds later, unless something else was copied by then.
+
 Opening a one-time secret is what uses it up, so the link is described first
 and you are asked before it is opened. --yes opens it without asking, and is
 needed where there is no terminal to ask on. Reusable secrets open right away.
@@ -46,8 +55,10 @@ which keeps it out of your shell history.`,
 		Example: `  secretli open 'https://secretli.app/s#…'
   secretli open 'https://secretli.app/s#…' --out ./received
   secretli open 'https://secretli.app/s#…' --stdout > backup.tgz
+  secretli open 'https://secretli.app/s#…' --copy
   pbpaste | secretli open`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			err := e.open(cmd.Context(), o, args)
 			if errors.Is(err, errNotOpened) {
@@ -70,6 +81,26 @@ func addOpenFlags(cmd *cobra.Command, o *openOptions) {
 	f.BoolVarP(&o.password, "password", "p", false, "the secret has a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVarP(&o.yes, "yes", "y", false, "open a one-time secret without asking; needed when not at a terminal")
+	f.BoolVarP(&o.copy, "copy", "c", false, "copy text to the clipboard instead of printing it; cleared after 45 seconds")
+	_ = cmd.MarkFlagDirname("out")
+}
+
+// checkCopy refuses --copy where it cannot work. It runs before the link or
+// the code is taken, so that nothing is used up for a refusal.
+func (e *env) checkCopy(o openOptions) error {
+	if !o.copy {
+		return nil
+	}
+	switch {
+	case o.toStdout:
+		return errors.New("--stdout writes a file and --copy copies text; use one of them")
+	case e.json:
+		return errors.New("--json prints the secret; leave out --copy")
+	}
+	if err := clipboard.Available(); err != nil {
+		return fmt.Errorf("--copy: %w", err)
+	}
+	return nil
 }
 
 // describedGone carries the owner's or the recipient's version of what became
@@ -91,6 +122,9 @@ func describeGone(err error, owner bool) error {
 }
 
 func (e *env) open(ctx context.Context, o openOptions, args []string) error {
+	if err := e.checkCopy(o); err != nil {
+		return err
+	}
 	link, err := e.linkArg(ctx, args)
 	if err != nil {
 		return err
@@ -107,6 +141,9 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		return describeGone(err, link.IsOwner())
 	}
 	e.say("%s\n", describeInfo(info, link.IsOwner(), now))
+	if o.copy && info.Kind != share.KindText {
+		return errCopyIsForText
+	}
 	if !info.Reusable && !o.yes {
 		if err := e.confirmOpen(ctx, link.IsOwner()); err != nil {
 			return err
@@ -128,7 +165,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		opened, err := share.Open(ctx, c, link, password, sink, bar.update)
 		bar.finish()
 		if err == nil {
-			return e.printOpened(opened, sink)
+			return e.printOpened(opened, sink, o.copy)
 		}
 		// A mistyped password costs nothing: the server only hands out the
 		// secret once the right token arrives. Ask again at a terminal.
@@ -280,7 +317,7 @@ func safeName(name string) string {
 	return name
 }
 
-func (e *env) printOpened(opened *share.Opened, sink *fileSink) error {
+func (e *env) printOpened(opened *share.Opened, sink *fileSink, copyText bool) error {
 	if e.json {
 		out := map[string]any{
 			"kind":       opened.Info.Kind,
@@ -297,6 +334,9 @@ func (e *env) printOpened(opened *share.Opened, sink *fileSink) error {
 		return e.emitJSON(out)
 	}
 	if opened.Info.Kind == share.KindText && sink.text != nil {
+		if copyText {
+			return e.copySecret(string(sink.text), "the secret")
+		}
 		if _, err := e.stdout.Write(sink.text); err != nil {
 			return err
 		}
