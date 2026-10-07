@@ -99,7 +99,7 @@ make test    # go test -race ./...
 make lint
 ```
 
-The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. CI runs the same tests against the real server too, the latest published image, so the fake cannot drift from it; checks that look inside the fake are skipped there. To do that locally, start a server with raised rate limits (the tests send many requests from one address) and point the tests at it:
+The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. CI runs the same tests against the real server too, the latest published image, so the fake cannot drift from it; checks that look inside the fake are skipped there. CI also runs the whole of Secretli with each change, from [secretli/e2e](https://github.com/secretli/e2e): the server, the web app and the browser with this client, and a release is only made when that passes for its tag. To do that locally, start a server with raised rate limits (the tests send many requests from one address) and point the tests at it:
 
 ```bash
 # Postgres and SeaweedFS from a checkout of secretli/server, then the server image
