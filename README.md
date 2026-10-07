@@ -57,17 +57,17 @@ Links open once and expire after a day unless you say otherwise: `-e` takes `5m`
 
 Every share prints two links: the one to hand out, and the owner link, which can delete the secret and tells you whether it was opened. Keep the owner link to yourself.
 
-**Opening.** Text goes to stdout exactly as it was shared. Files are saved to the current directory or to `--out`, and nothing is overwritten unless you pass `--force`; `--stdout` streams a single file instead. Before anything is opened, the command says what the link points to, since opening a one-time secret uses it up. Without an argument the link is read from stdin, or asked for, which keeps it out of your shell history too.
+**Opening.** Text goes to stdout exactly as it was shared. Files are saved to the current directory or to `--out`, and nothing is overwritten unless you pass `--force`; `--stdout` streams a single file instead. Before anything is opened, the command says what the link points to. Opening a one-time secret uses it up, so for one of those it asks first, and Enter means no; `-y`/`--yes` opens it without asking. Reusable secrets open right away. Without an argument the link is read from stdin, or asked for, which keeps it out of your shell history too.
 
 **Handing a link over with a code.** Instead of copying a link to another device, `send` hands it over with a short code like `7-acid-rocket`. On the other device, type the code at the server's `/c` page (`secretli.app/c`) or run `secretli receive 7-acid-rocket`; `secretli share --code` makes a secret and hands it over in one go. The link travels encrypted, and only after the other device has proved it typed the same code; the words never leave the two devices. A code works once and for ten minutes, and a wrong code ends the transfer on both sides. Given an owner link, `send` hands over only the link to hand out. It works both ways with the web app's "Send with a code".
 
-`receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force` and password options, or prints the link with `--link`. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
+`receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force`, `--yes` and password options, or prints the link with `--link`. If you decline to open a one-time secret, it prints the link instead, since the code is used up by then. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
 
 **Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. For a secret that is gone it says what happened: opened and when, expired, or deleted. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
 
 ## Scripts
 
-stdout carries only the result, so `secretli share … | pbcopy` copies exactly the link; descriptions, the owner link and progress go to stderr. Nothing is asked when stdin is not a terminal; a command that would need an answer fails instead. `--json` prints results and errors as JSON, and `-q` prints only the result.
+stdout carries only the result, so `secretli share … | pbcopy` copies exactly the link; descriptions, the owner link and progress go to stderr. Questions are asked on the terminal, so a pipe on stdin doesn't get in the way. Where there is no terminal, as in CI, nothing is asked and a command that would need an answer fails instead: `delete` and opening a one-time secret need `--yes`, and `receive` needs `--yes` or `--link`, which it checks before it takes the code. `--json` prints results and errors as JSON, and `-q` prints only the result.
 
 `send` and `share --code` print the code as their result as soon as there is one, then wait. With `--json` they print two lines: the code (`{"code": …, "code_expires_at": …}`, plus the new secret's fields for `share --code`), then `{"delivered": true}` once the link was handed over, or an error.
 

@@ -23,7 +23,11 @@ type openOptions struct {
 	force        bool
 	password     bool
 	passwordFile string
+	yes          bool
 }
+
+// errNotOpened is a one-time secret the person chose not to open yet.
+var errNotOpened = errors.New("not opened")
 
 func newOpenCmd(e *env) *cobra.Command {
 	var o openOptions
@@ -34,7 +38,9 @@ func newOpenCmd(e *env) *cobra.Command {
 saved to the current directory, or to --out, and never overwrite anything
 unless --force is given.
 
-Opening a one-time secret is what uses it up, so the link is described first.
+Opening a one-time secret is what uses it up, so the link is described first
+and you are asked before it is opened. --yes opens it without asking, and is
+needed where there is no terminal to ask on. Reusable secrets open right away.
 Without an argument the link is read from stdin, or asked for at a terminal,
 which keeps it out of your shell history.`,
 		Example: `  secretli open 'https://secretli.app/s#…'
@@ -43,7 +49,12 @@ which keeps it out of your shell history.`,
   pbpaste | secretli open`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: run(func(cmd *cobra.Command, args []string) error {
-			return e.open(cmd.Context(), o, args)
+			err := e.open(cmd.Context(), o, args)
+			if errors.Is(err, errNotOpened) {
+				e.note("Not opened; the link still works.\n")
+				return &exitWith{code: ExitError}
+			}
+			return err
 		}),
 	}
 	addOpenFlags(cmd, &o)
@@ -58,6 +69,7 @@ func addOpenFlags(cmd *cobra.Command, o *openOptions) {
 	f.BoolVar(&o.force, "force", false, "overwrite files that already exist")
 	f.BoolVarP(&o.password, "password", "p", false, "the secret has a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
+	f.BoolVarP(&o.yes, "yes", "y", false, "open a one-time secret without asking; needed when not at a terminal")
 }
 
 // describedGone carries the owner's or the recipient's version of what became
@@ -95,6 +107,11 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		return describeGone(err, link.IsOwner())
 	}
 	e.say("%s\n", describeInfo(info, link.IsOwner(), now))
+	if !info.Reusable && !o.yes {
+		if err := e.confirmOpen(ctx, link.IsOwner()); err != nil {
+			return err
+		}
+	}
 
 	source := passwordSource{flag: o.password, file: o.passwordFile}
 	password, err := source.resolve(ctx, e, info.PasswordProtected, false)
@@ -127,6 +144,29 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		}
 		return describeGone(err, link.IsOwner())
 	}
+}
+
+// confirmOpen asks before a one-time secret is used up, which cannot be
+// undone. It returns errNotOpened for a no; without a terminal to ask on,
+// --yes has to answer.
+func (e *env) confirmOpen(ctx context.Context, owner bool) error {
+	t, err := e.terminal()
+	if err != nil {
+		return errors.New("this secret opens only once; use --yes to open it without being asked")
+	}
+	defer t.close()
+	question := "Open it now? It opens only once; after that the link stops working."
+	if owner {
+		question = "Open it now? It opens only once, so the person you sent it to won't be able to."
+	}
+	ok, err := t.confirm(ctx, question)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errNotOpened
+	}
+	return nil
 }
 
 // linkArg takes the link from the arguments, from stdin, or from a prompt.

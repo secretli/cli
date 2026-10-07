@@ -96,7 +96,7 @@ func TestShareOpenStatusDeleteFromThePipe(t *testing.T) {
 	}
 
 	// The text comes back exactly, newline included, with the description on stderr.
-	stdout, stderr, code = runCLI(t, "", "open", link)
+	stdout, stderr, code = runCLI(t, "", "open", link, "--yes")
 	if code != 0 || stdout != "the launch code\n" {
 		t.Fatalf("open: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}

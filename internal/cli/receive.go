@@ -31,6 +31,11 @@ secretli send or from "Send with a code" in the web app, and opens it like
 secretli open: text to stdout, files to the current directory or --out.
 --link prints the link instead of opening it.
 
+A one-time secret is described and you are asked before it is opened, as
+with open; --yes opens it without asking. Answering no prints the link,
+which still works. Where there is no terminal to ask on, receive needs
+--yes or --link, and checks that before it takes the code.
+
 Typing is forgiving: "7 acid rocket", "7-ACID-ROCKET" and "7-aci-roc" all
 work. A wrong code ends the transfer on both sides; ask for a new one.
 Without an argument the code is read from stdin, or asked for at a terminal.`,
@@ -48,6 +53,11 @@ Without an argument the code is read from stdin, or asked for at a terminal.`,
 }
 
 func (e *env) receive(ctx context.Context, o receiveOptions, args []string) error {
+	// A code works once: find out now whether what it brings could be
+	// opened, rather than lose the link after the transfer.
+	if !o.yes && !o.linkOnly && !e.canAsk() {
+		return errors.New("receive asks before it opens a one-time secret, and there is no terminal to ask on; use --yes to open it anyway, or --link to print the link")
+	}
 	code, err := e.codeArg(ctx, args)
 	if err != nil {
 		return err
@@ -69,13 +79,26 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 		return fmt.Errorf("the code delivered a link for another server, %s; it was not opened", link.Origin)
 	}
 	if o.linkOnly {
-		if e.json {
-			return e.emitJSON(map[string]any{"link": link.String()})
-		}
-		_, _ = fmt.Fprintln(e.stdout, link.String())
-		return nil
+		return e.printLink(link)
 	}
-	return e.openLink(ctx, o.openOptions, link)
+	err = e.openLink(ctx, o.openOptions, link)
+	if errors.Is(err, errNotOpened) {
+		// The code is used up; the link is the only way back to the secret.
+		e.note("Not opened. Here is the link, which still works:\n")
+		if err := e.printLink(link); err != nil {
+			return err
+		}
+		return &exitWith{code: ExitError}
+	}
+	return err
+}
+
+func (e *env) printLink(link share.Link) error {
+	if e.json {
+		return e.emitJSON(map[string]any{"link": link.String()})
+	}
+	_, _ = fmt.Fprintln(e.stdout, link.String())
+	return nil
 }
 
 // codeArg takes the code from the arguments, which may be its parts, from

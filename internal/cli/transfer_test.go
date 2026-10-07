@@ -65,7 +65,7 @@ func TestSendAndReceiveWithACode(t *testing.T) {
 
 	// Typed loosely, in parts.
 	parts := strings.Split(strings.ToUpper(transferCode), "-")
-	stdout, stderr, code := runCLI(t, "", "receive", parts[0], parts[1], parts[2], server)
+	stdout, stderr, code := runCLI(t, "", "receive", parts[0], parts[1], parts[2], server, "--yes")
 	if code != 0 || stdout != "the launch code\n" {
 		t.Fatalf("receive: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
@@ -87,7 +87,7 @@ func TestAWrongCodeFailsOnBothSides(t *testing.T) {
 		wrong = nameplate + "-acid-rocket"
 	}
 
-	_, stderr, code := runCLI(t, "", "receive", wrong, server)
+	_, stderr, code := runCLI(t, "", "receive", wrong, server, "--yes")
 	if code != ExitPassword || !strings.Contains(stderr, "the code didn't match; ask for a new code") {
 		t.Errorf("receive: exit %d, stderr %q", code, stderr)
 	}
@@ -95,7 +95,7 @@ func TestAWrongCodeFailsOnBothSides(t *testing.T) {
 		t.Errorf("send: exit %d, stderr %q", code, sender.stderr())
 	}
 	// The secret is still there: nothing was delivered or opened.
-	if stdout, _, code := runCLI(t, "", "open", strings.TrimSpace(link)); code != 0 || stdout != "secret\n" {
+	if stdout, _, code := runCLI(t, "", "open", strings.TrimSpace(link), "--yes"); code != 0 || stdout != "secret\n" {
 		t.Errorf("open after the mismatch: exit %d, stdout %q", code, stdout)
 	}
 }
@@ -139,9 +139,9 @@ func TestReceiveRefusesBadCodes(t *testing.T) {
 		exit int
 		says string
 	}{
-		{[]string{"receive", "7-acid-rocket", server}, ExitGone, "no transfer with that number"},
-		{[]string{"receive", "acid-rocket", server}, ExitError, "codes look like 7-acid-rocket"},
-		{[]string{"receive", "7-acid-rokcet", server}, ExitError, `"rokcet" isn't a code word`},
+		{[]string{"receive", "7-acid-rocket", server, "--yes"}, ExitGone, "no transfer with that number"},
+		{[]string{"receive", "acid-rocket", server, "--yes"}, ExitError, "codes look like 7-acid-rocket"},
+		{[]string{"receive", "7-acid-rokcet", server, "--yes"}, ExitError, `"rokcet" isn't a code word`},
 		{[]string{"share", "-t", "x", "--code", "--qr", server}, ExitError, "leave out --qr and --copy"},
 	} {
 		_, stderr, code := runCLI(t, "", c.args...)
@@ -150,7 +150,7 @@ func TestReceiveRefusesBadCodes(t *testing.T) {
 		}
 	}
 	// The code can come from stdin too.
-	if _, stderr, code := runCLI(t, "7 acid rocket\n", "receive", server); code != ExitGone {
+	if _, stderr, code := runCLI(t, "7 acid rocket\n", "receive", server, "--yes"); code != ExitGone {
 		t.Errorf("code from stdin: exit %d, stderr %q", code, stderr)
 	}
 }

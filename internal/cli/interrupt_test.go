@@ -14,7 +14,7 @@ import (
 func TestAnInterruptEndsAWaitingRead(t *testing.T) {
 	for _, args := range [][]string{
 		{"open"},                                 // the link from stdin
-		{"receive"},                              // the code from stdin
+		{"receive", "--yes"},                     // the code from stdin
 		{"share", "--server=http://127.0.0.1:1"}, // the text from stdin
 	} {
 		t.Run(args[0], func(t *testing.T) {

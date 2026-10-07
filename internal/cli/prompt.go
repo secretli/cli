@@ -46,9 +46,29 @@ type terminal struct {
 
 var errNoTerminal = errors.New("not at a terminal")
 
+// openTTY opens the controlling terminal. The tests replace it, so that
+// they never ask on the terminal they run in.
+var openTTY = func() (*terminal, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &terminal{in: tty, out: tty, fd: int(tty.Fd()), own: true}, nil
+}
+
+// canAsk reports whether there is a terminal to ask on.
+func (e *env) canAsk() bool {
+	t, err := e.terminal()
+	if err != nil {
+		return false
+	}
+	t.close()
+	return true
+}
+
 func (e *env) terminal() (*terminal, error) {
-	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
-		return &terminal{in: tty, out: tty, fd: int(tty.Fd()), own: true}, nil
+	if t, err := openTTY(); err == nil {
+		return t, nil
 	}
 	if e.stdinTTY {
 		return &terminal{in: e.stdin, out: e.stderr, fd: int(e.stdin.Fd())}, nil
