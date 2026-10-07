@@ -43,7 +43,7 @@ With a Go toolchain:
 go install github.com/secretli/cli/cmd/secretli@latest
 ```
 
-For shell completion, `secretli completion zsh --help` (or `bash`, `fish`, `powershell`) shows the line to add to your shell's startup file.
+For shell completion, `secretli completion zsh --help` (or `bash`, `fish`, `powershell`) shows the line to add to your shell's startup file. It completes commands, flags and `-e`'s lifetimes, and offers no files where a link or a code goes.
 
 ## Use
 
@@ -59,9 +59,11 @@ Every share prints two links: the one to hand out, and the owner link, which can
 
 **Opening.** Text goes to stdout exactly as it was shared. Files are saved to the current directory or to `--out`, and nothing is overwritten unless you pass `--force`; `--stdout` streams a single file instead. Before anything is opened, the command says what the link points to. Opening a one-time secret uses it up, so for one of those it asks first, and Enter means no; `-y`/`--yes` opens it without asking. Reusable secrets open right away. Without an argument the link is read from stdin, or asked for, which keeps it out of your shell history too.
 
+`-c`/`--copy` puts text on the clipboard instead of the terminal, so it doesn't stay in the scrollback. The final line break is left off, so pasting a password doesn't also press Enter. 45 seconds later the clipboard is cleared, unless you copied something else by then. Before anything is opened, `--copy` checks that there is a clipboard tool (`pbcopy`, `wl-copy`, `xclip`, `xsel` or `clip.exe`) and that the secret is text; should copying still fail, the text is printed after all, so a one-time secret isn't lost.
+
 **Handing a link over with a code.** Instead of copying a link to another device, `send` hands it over with a short code like `7-acid-rocket`. On the other device, type the code at the server's `/c` page (`secretli.app/c`) or run `secretli receive 7-acid-rocket`; `secretli share --code` makes a secret and hands it over in one go. The link travels encrypted, and only after the other device has proved it typed the same code; the words never leave the two devices. A code works once and for ten minutes, and a wrong code ends the transfer on both sides. Given an owner link, `send` hands over only the link to hand out. It works both ways with the web app's "Send with a code".
 
-`receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force`, `--yes` and password options, or prints the link with `--link`. If you decline to open a one-time secret, it prints the link instead, since the code is used up by then. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
+`receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force`, `--yes`, `--copy` and password options, or prints the link with `--link` (with `--copy`, it copies the link). If you decline to open a one-time secret, it prints the link instead, since the code is used up by then. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
 
 **Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. For a secret that is gone it says what happened: opened and when, expired, or deleted. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
 

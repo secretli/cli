@@ -1,13 +1,8 @@
 package cli
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os/exec"
-	"runtime"
-	"strings"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -21,32 +16,6 @@ func printQR(w io.Writer, text string) error {
 	}
 	_, err = io.WriteString(w, q.ToSmallString(false))
 	return err
-}
-
-// copyToClipboard puts text on the system clipboard with whatever tool the
-// desktop has.
-func copyToClipboard(text string) error {
-	var candidates [][]string
-	switch runtime.GOOS {
-	case "darwin":
-		candidates = [][]string{{"pbcopy"}}
-	case "windows":
-		candidates = [][]string{{"clip.exe"}}
-	default:
-		candidates = [][]string{{"wl-copy"}, {"xclip", "-selection", "clipboard"}, {"xsel", "--clipboard", "--input"}, {"clip.exe"}}
-	}
-	for _, c := range candidates {
-		if _, err := exec.LookPath(c[0]); err != nil {
-			continue
-		}
-		cmd := exec.CommandContext(context.Background(), c[0], c[1:]...) //nolint:gosec // fixed list of known clipboard tools
-		cmd.Stdin = strings.NewReader(text)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s: %w", c[0], err)
-		}
-		return nil
-	}
-	return errors.New("no clipboard tool found (pbcopy, wl-copy, xclip, xsel or clip.exe)")
 }
 
 // progressBar redraws one line on stderr while bytes move. It stays quiet

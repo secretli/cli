@@ -62,6 +62,7 @@ short code instead of printing it, as secretli send does.`,
 	f.StringVarP(&o.text, "text", "t", "", "the text to share, instead of reading it from stdin")
 	f.StringVarP(&o.name, "name", "n", "", "share stdin as a file with this name, instead of as text")
 	f.StringVarP(&o.expires, "expires", "e", share.DefaultExpiration, "how long the link lives: "+strings.Join(share.Expirations, ", "))
+	_ = cmd.RegisterFlagCompletionFunc("expires", cobra.FixedCompletions(share.Expirations, cobra.ShellCompDirectiveNoFileComp))
 	f.BoolVar(&o.reusable, "reusable", false, "let the link open again and again until it expires")
 	f.BoolVarP(&o.password, "password", "p", false, "protect the secret with a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
@@ -227,7 +228,7 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 		}
 	}
 	if o.copyLink {
-		if err := copyToClipboard(link); err != nil {
+		if err := clipboard.Copy(link); err != nil {
 			e.note("Couldn't copy to the clipboard: %v\n", err)
 		} else {
 			e.note("Copied the link to the clipboard.\n")

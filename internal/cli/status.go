@@ -23,7 +23,8 @@ For a secret that is gone it tells what happened: opened (and when), expired,
 or deleted. The exit code is 4 then, so scripts can tell.`,
 		Example: `  secretli status 'https://secretli.app/s#…!…'
   secretli status "$LINK" --json | jq -r .state`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			return e.status(cmd.Context(), args)
 		}),

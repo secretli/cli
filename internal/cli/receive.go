@@ -29,7 +29,8 @@ func newReceiveCmd(e *env) *cobra.Command {
 		Long: `Receives a link that another device hands over with a short code, from
 secretli send or from "Send with a code" in the web app, and opens it like
 secretli open: text to stdout, files to the current directory or --out.
---link prints the link instead of opening it.
+--link prints the link instead of opening it. --copy puts the text, or with
+--link the link, on the clipboard instead, as with open.
 
 A one-time secret is described and you are asked before it is opened, as
 with open; --yes opens it without asking. Answering no prints the link,
@@ -42,7 +43,8 @@ Without an argument the code is read from stdin, or asked for at a terminal.`,
 		Example: `  secretli receive 7-acid-rocket
   secretli receive 7 acid rocket --out ./received
   secretli receive 7-acid-rocket --link`,
-		Args: cobra.ArbitraryArgs,
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			return e.receive(cmd.Context(), o, args)
 		}),
@@ -57,6 +59,9 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 	// opened, rather than lose the link after the transfer.
 	if !o.yes && !o.linkOnly && !e.canAsk() {
 		return errors.New("receive asks before it opens a one-time secret, and there is no terminal to ask on; use --yes to open it anyway, or --link to print the link")
+	}
+	if err := e.checkCopy(o.openOptions); err != nil {
+		return err
 	}
 	code, err := e.codeArg(ctx, args)
 	if err != nil {
@@ -79,18 +84,26 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 		return fmt.Errorf("the code delivered a link for another server, %s; it was not opened", link.Origin)
 	}
 	if o.linkOnly {
+		if o.copy {
+			return e.copySecret(link.String(), "the link")
+		}
 		return e.printLink(link)
 	}
+	// The code is used up; if the secret is not opened, the link is the
+	// only way back to it.
 	err = e.openLink(ctx, o.openOptions, link)
-	if errors.Is(err, errNotOpened) {
-		// The code is used up; the link is the only way back to the secret.
+	switch {
+	case errors.Is(err, errNotOpened):
 		e.note("Not opened. Here is the link, which still works:\n")
-		if err := e.printLink(link); err != nil {
-			return err
-		}
-		return &exitWith{code: ExitError}
+	case errors.Is(err, errCopyIsForText):
+		e.note("Not opened: %v. Here is the link, which still works:\n", err)
+	default:
+		return err
 	}
-	return err
+	if err := e.printLink(link); err != nil {
+		return err
+	}
+	return &exitWith{code: ExitError}
 }
 
 func (e *env) printLink(link share.Link) error {

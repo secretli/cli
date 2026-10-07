@@ -32,7 +32,8 @@ Prints the code and waits until the link was handed over. Without an
 argument the link is read from stdin, or asked for at a terminal.`,
 		Example: `  secretli send 'https://secretli.app/s#…'
   secretli share notes.txt -q | secretli send`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			link, err := e.linkArg(ctx, args)
