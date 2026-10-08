@@ -186,34 +186,6 @@ func TestOwnerCommandsOnAGoneSecretSpeakToTheOwner(t *testing.T) {
 	}
 }
 
-func TestAnExpiredSecretIsJustNotFound(t *testing.T) {
-	srv := fakeServer(t)
-	fake := srv.Fake()
-	if fake == nil {
-		t.Skip("a real server cannot be made to expire its secrets")
-	}
-	server := "--server=" + srv.URL
-
-	stdout, stderr, code := runCLI(t, "the launch code\n", "share", server, "--json")
-	var shared struct {
-		Link      string `json:"link"`
-		OwnerLink string `json:"owner_link"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &shared); err != nil || code != 0 {
-		t.Fatalf("share: exit %d, %v, stdout %q, stderr %q", code, err, stdout, stderr)
-	}
-	fake.Expire()
-
-	// Not found, like a link to nothing, and the same for the commands that
-	// open or delete it. status tells it as a state, which has its own test.
-	const notFound = "secretli: this secret is gone: it may have expired, been opened or been deleted\n"
-	for _, args := range [][]string{{"open", shared.Link, "--yes"}, {"delete", shared.OwnerLink, "--yes"}} {
-		if stdout, stderr, code := runCLI(t, "", args...); code != ExitGone || stdout != "" || stderr != notFound {
-			t.Errorf("%s: exit %d, stdout %q, stderr %q", args[0], code, stdout, stderr)
-		}
-	}
-}
-
 // unknownLink is a link to a secret that was never uploaded to this server.
 func unknownLink(t *testing.T, origin string) (owner, recipient string) {
 	t.Helper()
@@ -230,7 +202,7 @@ func unknownLink(t *testing.T, origin string) (owner, recipient string) {
 // server cannot tell why. status says the secret is gone and nothing more,
 // with the exit code 4, so that a script can always count on the state being
 // live or gone. The other commands keep failing with an error.
-func TestStatusOfALinkTheServerHasNoRecordOfIsGone(t *testing.T) {
+func TestALinkTheServerHasNoRecordOfIsGone(t *testing.T) {
 	srv := fakeServer(t)
 	cases := []struct {
 		name  string
@@ -273,8 +245,14 @@ func TestStatusOfALinkTheServerHasNoRecordOfIsGone(t *testing.T) {
 				}
 			}
 
-			// open and delete are errors still, as JSON too: the error and its
-			// code, and no state, since there is no outcome either.
+			// open and delete are errors still: on stderr, and as JSON the error
+			// and its code, with no state, since there is no outcome either.
+			const notFound = "secretli: this secret is gone: it may have expired, been opened or been deleted\n"
+			for _, args := range [][]string{{"open", recipient, "--yes"}, {"delete", owner, "--yes"}} {
+				if stdout, stderr, code := runCLI(t, "", args...); code != ExitGone || stdout != "" || stderr != notFound {
+					t.Errorf("%s: exit %d, stdout %q, stderr %q", args[0], code, stdout, stderr)
+				}
+			}
 			for _, args := range [][]string{{"open", recipient, "--json"}, {"delete", owner, "--yes", "--json"}} {
 				stdout, _, code := runCLI(t, "", args...)
 				var failure map[string]any
