@@ -19,8 +19,9 @@ func newStatusCmd(e *env) *cobra.Command {
 password or not, when it was sent and when it expires. Nothing is opened, so
 a one-time secret stays unopened.
 
-For a secret that is gone it tells what happened: opened (and when), expired,
-or deleted. The exit code is 4 then, so scripts can tell.`,
+For a secret that is gone it tells what happened: opened or deleted. The exit
+code is 4 then, so scripts can tell. An expired secret is simply not found,
+which exits with 4 too.`,
 		Example: `  secretli status 'https://secretli.app/s#…!…'
   secretli status "$LINK" --json | jq -r .state`,
 		Args:              cobra.MaximumNArgs(1),
@@ -48,14 +49,9 @@ func (e *env) status(ctx context.Context, args []string) error {
 	if errors.As(err, &gone) {
 		if e.json {
 			out := map[string]any{
-				"state":           "gone",
-				"outcome":         gone.Gone.Outcome,
-				"one_time":        gone.Gone.BurnAfterRead,
-				"ended_at":        gone.Gone.EndedAt.UTC(),
-				"opened_by_owner": gone.Gone.OpenedByOwner,
-			}
-			if gone.Gone.FirstOpenedAt != nil {
-				out["first_opened_at"] = gone.Gone.FirstOpenedAt.UTC()
+				"state":    "gone",
+				"outcome":  gone.Gone.Outcome,
+				"one_time": gone.Gone.BurnAfterRead,
 			}
 			if err := e.emitJSON(out); err != nil {
 				return err
@@ -79,9 +75,7 @@ func (e *env) status(ctx context.Context, args []string) error {
 			"encrypted_size": info.EncryptedSize,
 			"expires_at":     info.ExpiresAt.UTC(),
 			"created_at":     info.CreatedAt.UTC(),
-		}
-		if info.OpenedAt != nil {
-			out["opened_at"] = info.OpenedAt.UTC()
+			"opened":         info.Opened,
 		}
 		return e.emitJSON(out)
 	}
@@ -99,10 +93,9 @@ func (e *env) status(ctx context.Context, args []string) error {
 		what += " with a password"
 	}
 	_, _ = fmt.Fprintf(e.stdout, "%s.\nSent %s, expires %s.\n", what, formatMoment(info.CreatedAt, now), formatMoment(info.ExpiresAt, now))
-	switch {
-	case info.OpenedAt != nil:
-		_, _ = fmt.Fprintf(e.stdout, "First opened %s.\n", formatMoment(*info.OpenedAt, now))
-	default:
+	if info.Opened {
+		_, _ = fmt.Fprintln(e.stdout, "It has been opened.")
+	} else {
 		_, _ = fmt.Fprintln(e.stdout, "Not opened yet.")
 	}
 	return nil

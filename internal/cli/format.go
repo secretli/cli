@@ -81,8 +81,8 @@ func describeInfo(info *share.Info, owner bool, now time.Time) string {
 	}
 	s := fmt.Sprintf("%s, sent %s, expires %s.", what, formatAgo(info.CreatedAt, now), formatMoment(info.ExpiresAt, now))
 	if owner && info.Reusable {
-		if info.OpenedAt != nil {
-			s += " First opened " + formatMoment(*info.OpenedAt, now) + "."
+		if info.Opened {
+			s += " It has been opened."
 		} else {
 			s += " Nobody has opened it yet."
 		}
@@ -91,42 +91,26 @@ func describeInfo(info *share.Info, owner bool, now time.Time) string {
 }
 
 // goneSentence tells what became of a secret, to its owner or a recipient,
-// in the web app's words.
+// in the web app's words. The server tells no times, and no difference
+// between the owner opening a one-time secret and a recipient doing so.
 func goneSentence(g api.Gone, owner bool) string {
-	now := time.Now()
-	when := formatMoment(g.EndedAt, now)
-	first := ""
-	if g.FirstOpenedAt != nil {
-		first = formatMoment(*g.FirstOpenedAt, now)
-	}
 	switch g.Outcome {
 	case "opened":
-		switch {
-		case owner && g.OpenedByOwner:
-			return fmt.Sprintf("Your secret is gone: you opened it yourself %s, and it was a one-time secret.", when)
-		case owner:
-			return fmt.Sprintf("Your secret was opened %s. It was a one-time secret, so nothing is left on the server.", when)
-		case g.OpenedByOwner:
-			return fmt.Sprintf("This secret is gone: the sender opened it %s, and a one-time secret opens only once.", when)
+		if owner {
+			return "Your secret was opened. It was a one-time secret, so nothing is left on the server."
 		}
-		return fmt.Sprintf("This secret was already opened %s, and a one-time secret opens only once. If that wasn't you, tell the sender: the link may have reached someone else.", when)
+		return "This secret was already opened. If that wasn't you, tell the sender: the link may have reached someone else."
 	case "expired":
-		switch {
-		case owner && first != "":
-			return fmt.Sprintf("Your secret expired %s. It was first opened %s.", when, first)
-		case owner:
-			return fmt.Sprintf("Your secret expired unopened %s. Nothing is left on the server.", when)
+		// Only older servers say so; now an expired secret is a plain 404.
+		if owner {
+			return "Your secret expired. Nothing is left on the server."
 		}
-		return fmt.Sprintf("This secret expired %s. Nothing is left on the server, so ask the sender for a new link if you still need it.", when)
+		return "This secret expired. Nothing is left on the server, so ask the sender for a new link if you still need it."
 	case "deleted":
 		if owner {
-			s := fmt.Sprintf("You deleted this secret %s.", when)
-			if first != "" {
-				s += " It had been opened before, first " + first + "."
-			}
-			return s
+			return "You deleted this secret."
 		}
-		return fmt.Sprintf("The sender deleted this secret %s. Ask them for a new link if you still need it.", when)
+		return "The sender deleted this secret. Ask them for a new link if you still need it."
 	}
 	return "This secret is gone (" + g.Outcome + ")."
 }

@@ -82,7 +82,7 @@ func TestShareAndOpenText(t *testing.T) {
 	// A one-time secret is gone once opened, and its link says so.
 	_, err = share.Inspect(ctx, c, recipient)
 	var gone *share.GoneError
-	if !errors.As(err, &gone) || gone.Gone.Outcome != "opened" || gone.Gone.OpenedByOwner {
+	if !errors.As(err, &gone) || gone.Gone.Outcome != "opened" || !gone.Gone.BurnAfterRead {
 		t.Fatalf("after opening: err = %v, want a GoneError with outcome opened", err)
 	}
 	if _, err := share.Open(ctx, c, recipient, "", &memorySink{}, nil); !errors.As(err, &gone) {
@@ -149,7 +149,7 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 		t.Errorf("progress ended at %d", last)
 	}
 
-	// Reusable: the owner's own look is not an opening, a recipient's is.
+	// Reusable: it stays, and says that a recipient opened it.
 	if _, err := share.Open(ctx, c, result.Link, "hunter2", &memorySink{}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +157,65 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.OpenedAt == nil {
-		t.Error("a recipient opened it, so opened_at must be set")
+	if !info.Opened {
+		t.Error("a recipient opened it, so Opened must be set")
+	}
+}
+
+func TestOpenedMeansARecipientOpenedIt(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newClient(t, 32*1024*1024)
+	result, err := share.Share(ctx, c, share.Params{Text: []byte("again and again"), Reusable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := func() bool {
+		t.Helper()
+		info, err := share.Inspect(ctx, c, result.Link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Opened
+	}
+
+	if opened() {
+		t.Error("nobody has opened it yet")
+	}
+	// The owner's own look is not an opening, a recipient's is.
+	if _, err := share.Open(ctx, c, result.Link, "", &memorySink{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if opened() {
+		t.Error("only the owner has looked, so it is not opened")
+	}
+	for range 2 {
+		if _, err := share.Open(ctx, c, result.Link.Recipient(), "", &memorySink{}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !opened() {
+			t.Error("a recipient opened it, so it is opened")
+		}
+	}
+}
+
+func TestOneTimeSecretOpenedByItsOwnerIsJustOpened(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newClient(t, 32*1024*1024)
+	result, err := share.Share(ctx, c, share.Params{Text: []byte("mine")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := share.Open(ctx, c, result.Link, "", &memorySink{}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// The owner link and the recipient link are told the same story.
+	for name, l := range map[string]share.Link{"owner link": result.Link, "recipient link": result.Link.Recipient()} {
+		_, err = share.Inspect(ctx, c, l)
+		var gone *share.GoneError
+		if !errors.As(err, &gone) || gone.Gone != (api.Gone{Outcome: "opened", BurnAfterRead: true}) {
+			t.Errorf("%s after the owner opened it: err = %v, want a GoneError, opened and one-time", name, err)
+		}
 	}
 }
 
@@ -180,8 +237,63 @@ func TestDeleteNeedsTheOwnerLinkAndLeavesAStory(t *testing.T) {
 	}
 	_, err = share.Inspect(ctx, c, result.Link)
 	var gone *share.GoneError
-	if !errors.As(err, &gone) || gone.Gone.Outcome != "deleted" {
+	if !errors.As(err, &gone) || gone.Gone != (api.Gone{Outcome: "deleted", BurnAfterRead: true}) {
 		t.Errorf("after delete: err = %v, want GoneError deleted", err)
+	}
+	// Deleting again is told the same story.
+	if err := share.Delete(ctx, c, result.Link); !errors.As(err, &gone) || gone.Gone.Outcome != "deleted" {
+		t.Errorf("second delete: err = %v, want GoneError deleted", err)
+	}
+}
+
+// The server tells what became of a secret only until it would have expired;
+// after that, and for a secret that expired unopened, it knows nothing. A real
+// server cannot be made to wait, so this one is for the fake.
+func TestWhatBecameOfASecretIsKeptOnlyUntilItExpires(t *testing.T) {
+	ctx := context.Background()
+	c, srv := newClient(t, 32*1024*1024)
+	fake := srv.Fake()
+	if fake == nil {
+		t.Skip("a real server cannot be made to expire its secrets")
+	}
+	newSecret := func() share.Link {
+		t.Helper()
+		result, err := share.Share(ctx, c, share.Params{Text: []byte("x")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Link
+	}
+	opened, deleted, unopened := newSecret(), newSecret(), newSecret()
+	if _, err := share.Open(ctx, c, opened.Recipient(), "", &memorySink{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := share.Delete(ctx, c, deleted); err != nil {
+		t.Fatal(err)
+	}
+
+	var gone *share.GoneError
+	for name, l := range map[string]share.Link{"opened": opened, "deleted": deleted} {
+		if _, err := share.Inspect(ctx, c, l); !errors.As(err, &gone) || gone.Gone.Outcome != name {
+			t.Errorf("%s, before it expires: err = %v, want a GoneError", name, err)
+		}
+	}
+	if _, err := share.Inspect(ctx, c, unopened); err != nil {
+		t.Errorf("unopened, before it expires: err = %v", err)
+	}
+
+	fake.Expire()
+	var notFound *share.NotFoundError
+	for name, l := range map[string]share.Link{"opened": opened, "deleted": deleted, "unopened": unopened} {
+		if _, err := share.Inspect(ctx, c, l); !errors.As(err, &notFound) {
+			t.Errorf("%s, after it expired: err = %v, want a NotFoundError", name, err)
+		}
+		if _, err := share.Open(ctx, c, l.Recipient(), "", &memorySink{}, nil); !errors.As(err, &notFound) {
+			t.Errorf("%s, opened after it expired: err = %v, want a NotFoundError", name, err)
+		}
+		if err := share.Delete(ctx, c, l); !errors.As(err, &notFound) {
+			t.Errorf("%s, deleted after it expired: err = %v, want a NotFoundError", name, err)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -104,13 +105,14 @@ func TestShareOpenStatusDeleteFromThePipe(t *testing.T) {
 		t.Errorf("open stderr = %q", stderr)
 	}
 
-	// Gone now: status says so and exits 4, for the owner in the owner's words.
+	// Gone now: status says so and exits 4, for the owner in the owner's words
+	// and without a time.
 	stdout, _, code = runCLI(t, "", "status", ownerLink)
-	if code != ExitGone || !strings.Contains(stdout, "Your secret was opened today at") {
+	if code != ExitGone || stdout != "Your secret was opened. It was a one-time secret, so nothing is left on the server.\n" {
 		t.Errorf("status after open: exit %d, stdout %q", code, stdout)
 	}
 	_, stderr, code = runCLI(t, "", "open", link)
-	if code != ExitGone || !strings.Contains(stderr, "This secret was already opened") {
+	if code != ExitGone || stderr != "secretli: This secret was already opened. If that wasn't you, tell the sender: the link may have reached someone else.\n" {
 		t.Errorf("open after open: exit %d, stderr %q", code, stderr)
 	}
 }
@@ -143,6 +145,11 @@ func TestJSONAndFilesAndPasswords(t *testing.T) {
 	}
 	if shared.Opens != "until_expiry" || !shared.Password || shared.Kind != "files" || len(shared.Files) != 1 || shared.Files[0] != "notes.txt" {
 		t.Errorf("shared = %+v", shared)
+	}
+	stdout, _, code = runCLI(t, "", "status", shared.OwnerLink, "--json")
+	var status map[string]any
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != false {
+		t.Errorf("status before opening: exit %d, %v, %q", code, err, stdout)
 	}
 
 	// No password where one is needed, and a wrong one: exit 3 both times.
@@ -195,9 +202,12 @@ func TestJSONAndFilesAndPasswords(t *testing.T) {
 
 	// Status as JSON, then deletion with --yes, then the story.
 	stdout, _, code = runCLI(t, "", "status", shared.OwnerLink, "--json")
-	var status map[string]any
-	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened_at"] == nil {
+	status = nil
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != true {
 		t.Errorf("status: exit %d, %v, %q", code, err, stdout)
+	}
+	if _, ok := status["opened_at"]; ok {
+		t.Errorf("status tells when it was opened: %q", stdout)
 	}
 	if _, stderr, code = runCLI(t, "", "delete", shared.Link, "--yes"); code != ExitError || !strings.Contains(stderr, "owner link") {
 		t.Errorf("delete with the recipient link: exit %d, stderr %q", code, stderr)
@@ -208,9 +218,18 @@ func TestJSONAndFilesAndPasswords(t *testing.T) {
 	if stdout, _, code = runCLI(t, "", "delete", shared.OwnerLink, "--yes", "--json"); code != 0 || !strings.Contains(stdout, `"deleted":true`) {
 		t.Errorf("delete: exit %d, stdout %q", code, stdout)
 	}
+	// Gone, the story is the outcome and whether the secret was one-time, and
+	// no time and no one's name, here and in the error of any other command.
 	stdout, _, code = runCLI(t, "", "status", shared.OwnerLink, "--json")
-	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != ExitGone || status["outcome"] != "deleted" {
+	want := map[string]any{"state": "gone", "outcome": "deleted", "one_time": false}
+	status = nil
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != ExitGone || !reflect.DeepEqual(status, want) {
 		t.Errorf("status after delete: exit %d, %v, %q", code, err, stdout)
+	}
+	stdout, _, code = runCLI(t, "", "open", shared.Link, "--json")
+	status = nil
+	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != ExitGone || status["outcome"] != "deleted" || len(status) != 3 {
+		t.Errorf("open after delete: exit %d, %v, %q", code, err, stdout)
 	}
 }
 

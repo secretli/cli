@@ -201,11 +201,6 @@ func (e *env) report(err error) int {
 		body := map[string]any{"error": message(err), "code": code}
 		if errors.As(err, &gone) {
 			body["outcome"] = gone.Gone.Outcome
-			body["ended_at"] = gone.Gone.EndedAt
-			body["opened_by_owner"] = gone.Gone.OpenedByOwner
-			if gone.Gone.FirstOpenedAt != nil {
-				body["first_opened_at"] = *gone.Gone.FirstOpenedAt
-			}
 		}
 		_ = e.emitJSON(body)
 		return code
@@ -241,6 +236,12 @@ func exitCode(err error) int {
 }
 
 func message(err error) string {
+	// A gone secret described for the owner is told in the owner's words;
+	// the plain error it wraps would read as if a recipient asked.
+	var described *describedGone
+	if errors.As(err, &described) {
+		return described.Error()
+	}
 	var gone *share.GoneError
 	if errors.As(err, &gone) {
 		return goneSentence(gone.Gone, false)

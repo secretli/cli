@@ -73,7 +73,7 @@ Every share prints two links: the one to hand out, and the owner link, which can
 
 `receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force`, `--yes`, `--copy` and password options, or prints the link with `--link` (with `--copy`, it copies the link). If you decline to open a one-time secret, it prints the link instead, since the code is used up by then. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
 
-**Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. For a secret that is gone it says what happened: opened and when, expired, or deleted. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
+**Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. For a secret that is gone it says what happened, opened or deleted, but not when; one that has expired is simply not found. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
 
 ## Scripts
 
@@ -89,12 +89,12 @@ The exit code tells a script what happened:
 | 1 | an error |
 | 2 | wrong usage |
 | 3 | a password is needed, or it is wrong; a transfer code did not match |
-| 4 | the secret is gone: opened, expired or deleted; a transfer code is unknown, used, expired or stopped |
+| 4 | the secret is gone or not found: opened, deleted, expired or no such link; a transfer code is unknown, used, expired or stopped |
 | 5 | the server did not answer, or is limiting requests |
 
 ```bash
 link=$(printf '%s' "$DB_PASSWORD" | secretli share -e 1h -q)
-secretli status "$OWNER_LINK" --json | jq -r .state   # live or gone
+secretli status "$OWNER_LINK" --json | jq -r .state   # live or gone; null once the server no longer knows it
 ```
 
 ## Your own server
