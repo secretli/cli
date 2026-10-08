@@ -74,14 +74,13 @@ func IsStatus(err error, status int) bool {
 // details of its 410 answer, which it keeps until the secret would have
 // expired. After that the secret is simply not found.
 type Gone struct {
-	// Outcome is opened or deleted. Only older servers also say expired.
+	// Outcome is opened or deleted.
 	Outcome       string
 	BurnAfterRead bool
 }
 
-// AsGone extracts the story from a 410 answer. The outcome is all it needs:
-// older servers add times and whether the owner opened a one-time secret
-// themselves, which are not read.
+// AsGone extracts the story from a 410 answer; one without an outcome tells
+// none.
 func AsGone(err error) (*Gone, bool) {
 	var apiErr *Error
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusGone || apiErr.Details == nil {
@@ -117,9 +116,6 @@ func (c *Client) Metadata(ctx context.Context, publicID, metadataToken string) (
 		ExpiresAt     string `json:"expires_at"`
 		CreatedAt     string `json:"created_at"`
 		Opened        bool   `json:"opened"`
-		// Older servers send when a recipient first opened it instead, and
-		// only then; that it is there is all that is read.
-		OpenedAt *string `json:"opened_at"`
 	}
 	headers := http.Header{headerMetadataToken: {metadataToken}}
 	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/secrets/"+publicID+"/meta", headers, nil, &body); err != nil {
@@ -135,7 +131,7 @@ func (c *Client) Metadata(ctx context.Context, publicID, metadataToken string) (
 	}
 	return &Metadata{
 		EncryptedMeta: body.EncryptedMeta, BlobSize: body.BlobSize, BurnAfterRead: body.BurnAfterRead,
-		ExpiresAt: expires, CreatedAt: created, Opened: body.Opened || body.OpenedAt != nil,
+		ExpiresAt: expires, CreatedAt: created, Opened: body.Opened,
 	}, nil
 }
 

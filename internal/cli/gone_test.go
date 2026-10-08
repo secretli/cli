@@ -19,7 +19,6 @@ import (
 func TestGoneSentences(t *testing.T) {
 	opened := api.Gone{Outcome: "opened", BurnAfterRead: true}
 	deleted := api.Gone{Outcome: "deleted"}
-	expired := api.Gone{Outcome: "expired"} // only older servers say so
 	cases := []struct {
 		gone  api.Gone
 		owner bool
@@ -29,8 +28,6 @@ func TestGoneSentences(t *testing.T) {
 		{opened, false, "This secret was already opened. If that wasn't you, tell the sender: the link may have reached someone else."},
 		{deleted, true, "You deleted this secret."},
 		{deleted, false, "The sender deleted this secret. Ask them for a new link if you still need it."},
-		{expired, true, "Your secret expired. Nothing is left on the server."},
-		{expired, false, "This secret expired. Nothing is left on the server, so ask the sender for a new link if you still need it."},
 		{api.Gone{Outcome: "vanished"}, false, "This secret is gone (vanished)."},
 	}
 	for _, tc := range cases {
@@ -92,33 +89,29 @@ func stubbed(t *testing.T, status int, body string) (owner, recipient string) {
 	return l.String(), l.Recipient().String()
 }
 
-func liveAnswer(burnAfterRead bool, extra string) string {
-	return fmt.Sprintf(`{"encrypted_meta":"META","blob_size":359,"burn_after_read":%t,"expires_at":"2026-10-09T20:14:56Z","created_at":"2026-10-08T20:09:56Z"%s}`, burnAfterRead, extra)
+func liveAnswer(burnAfterRead, opened bool) string {
+	return fmt.Sprintf(`{"encrypted_meta":"META","blob_size":359,"burn_after_read":%t,"expires_at":"2026-10-09T20:14:56Z","created_at":"2026-10-08T20:09:56Z","opened":%t}`, burnAfterRead, opened)
 }
 
-// The command reads the answers of the server as it was, with times and
-// names, and as it is now, whichever server the other tests run against: the
-// live ones first, then the 410 answers. Either way it prints no time.
-func TestStatusReadsTheAnswersOfOlderAndNewerServers(t *testing.T) {
+// The command reads the answers of the server, the live ones first, then the
+// 410 answers. It prints no time of an opening or a deletion: there is none.
+func TestStatusTellsWhatBecameOfASecretWithoutTimes(t *testing.T) {
 	live := []struct {
-		name   string
-		body   string
-		opened bool
+		name          string
+		burnAfterRead bool
+		opened        bool
 	}{
-		{"older, reusable and opened", liveAnswer(false, `,"opened_at":"2026-10-08T20:11:00Z"`), true},
-		{"older, reusable and not opened", liveAnswer(false, ``), false},
-		{"older, one-time", liveAnswer(true, ``), false},
-		{"newer, reusable and opened", liveAnswer(false, `,"opened":true`), true},
-		{"newer, reusable and not opened", liveAnswer(false, `,"opened":false`), false},
-		{"newer, one-time", liveAnswer(true, `,"opened":false`), false},
+		{"reusable and opened", false, true},
+		{"reusable and not opened", false, false},
+		{"one-time", true, false},
 	}
 	for _, tc := range live {
 		t.Run(tc.name, func(t *testing.T) {
-			owner, _ := stubbed(t, http.StatusOK, tc.body)
+			owner, _ := stubbed(t, http.StatusOK, liveAnswer(tc.burnAfterRead, tc.opened))
 
 			stdout, stderr, code := runCLI(t, "", "status", owner, "--json")
 			var status map[string]any
-			if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != tc.opened {
+			if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != tc.opened || status["reusable"] != !tc.burnAfterRead {
 				t.Fatalf("status --json: exit %d, %v, stdout %q, stderr %q", code, err, stdout, stderr)
 			}
 			if _, ok := status["opened_at"]; ok {
@@ -136,19 +129,17 @@ func TestStatusReadsTheAnswersOfOlderAndNewerServers(t *testing.T) {
 		})
 	}
 
-	// The 410 answers as the real server gave them, and as it gives them
-	// now: only the outcome and whether the secret was one-time are read.
+	// The 410 answers: the outcome and whether the secret was one-time. An
+	// outcome the command has no sentence for is still told as gone.
 	gone := []struct {
 		name    string
 		details string
 		gone    api.Gone
 	}{
-		{"older, opened by a recipient", `{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"opened"}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"older, opened by its owner", `{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","opened_by_owner":true,"outcome":"opened"}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"older, deleted after being opened", `{"burn_after_read":false,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"deleted"}`, api.Gone{Outcome: "deleted"}},
-		{"older, expired", `{"burn_after_read":false,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"expired"}`, api.Gone{Outcome: "expired"}},
-		{"newer, opened", `{"outcome":"opened","burn_after_read":true}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"newer, deleted", `{"outcome":"deleted","burn_after_read":false}`, api.Gone{Outcome: "deleted"}},
+		{"opened", `{"outcome":"opened","burn_after_read":true}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
+		{"deleted", `{"outcome":"deleted","burn_after_read":false}`, api.Gone{Outcome: "deleted"}},
+		{"deleted, one-time", `{"outcome":"deleted","burn_after_read":true}`, api.Gone{Outcome: "deleted", BurnAfterRead: true}},
+		{"an outcome it has no word for", `{"outcome":"vanished","burn_after_read":false}`, api.Gone{Outcome: "vanished"}},
 	}
 	digit := regexp.MustCompile(`\d`)
 	for _, tc := range gone {

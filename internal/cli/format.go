@@ -100,12 +100,6 @@ func goneSentence(g api.Gone, owner bool) string {
 			return "Your secret was opened. It was a one-time secret, so nothing is left on the server."
 		}
 		return "This secret was already opened. If that wasn't you, tell the sender: the link may have reached someone else."
-	case "expired":
-		// Only older servers say so; now an expired secret is a plain 404.
-		if owner {
-			return "Your secret expired. Nothing is left on the server."
-		}
-		return "This secret expired. Nothing is left on the server, so ask the sender for a new link if you still need it."
 	case "deleted":
 		if owner {
 			return "You deleted this secret."
