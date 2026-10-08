@@ -1,6 +1,6 @@
 module github.com/secretli/cli
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/secretli/format v0.2.0
