@@ -201,11 +201,6 @@ func (e *env) report(err error) int {
 		body := map[string]any{"error": message(err), "code": code}
 		if errors.As(err, &gone) {
 			body["outcome"] = gone.Gone.Outcome
-			body["ended_at"] = gone.Gone.EndedAt
-			body["opened_by_owner"] = gone.Gone.OpenedByOwner
-			if gone.Gone.FirstOpenedAt != nil {
-				body["first_opened_at"] = *gone.Gone.FirstOpenedAt
-			}
 		}
 		_ = e.emitJSON(body)
 		return code

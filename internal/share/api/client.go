@@ -71,42 +71,28 @@ func IsStatus(err error, status int) bool {
 }
 
 // Gone is what the server tells about a secret that is no longer there: the
-// details of its 410 answer, kept for a week after the secret ended.
+// details of its 410 answer, which it keeps until the secret would have
+// expired. After that the secret is simply not found.
 type Gone struct {
-	// Outcome is opened, expired or deleted.
+	// Outcome is opened or deleted. Only older servers also say expired.
 	Outcome       string
 	BurnAfterRead bool
-	// EndedAt is when it happened; for an expired secret, its expiry.
-	EndedAt time.Time
-	// FirstOpenedAt is when a recipient first opened it, if anyone did.
-	FirstOpenedAt *time.Time
-	// OpenedByOwner marks a one-time secret the owner opened themselves.
-	OpenedByOwner bool
 }
 
-// AsGone extracts the story from a 410 answer.
+// AsGone extracts the story from a 410 answer. The outcome is all it needs:
+// older servers add times and whether the owner opened a one-time secret
+// themselves, which are not read.
 func AsGone(err error) (*Gone, bool) {
 	var apiErr *Error
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusGone || apiErr.Details == nil {
 		return nil, false
 	}
 	outcome, _ := apiErr.Details["outcome"].(string)
-	endedAt, ok := apiErr.Details["ended_at"].(string)
-	if outcome == "" || !ok {
+	if outcome == "" {
 		return nil, false
 	}
-	ended, err := time.Parse(time.RFC3339, endedAt)
-	if err != nil {
-		return nil, false
-	}
-	gone := &Gone{Outcome: outcome, EndedAt: ended}
+	gone := &Gone{Outcome: outcome}
 	gone.BurnAfterRead, _ = apiErr.Details["burn_after_read"].(bool)
-	gone.OpenedByOwner, _ = apiErr.Details["opened_by_owner"].(bool)
-	if first, ok := apiErr.Details["first_opened_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, first); err == nil {
-			gone.FirstOpenedAt = &t
-		}
-	}
 	return gone, true
 }
 
@@ -117,20 +103,23 @@ type Metadata struct {
 	BurnAfterRead bool
 	ExpiresAt     time.Time
 	CreatedAt     time.Time
-	// OpenedAt is when a recipient first opened a reusable secret, if one has.
-	OpenedAt *time.Time
+	// Opened is whether a recipient has opened a reusable secret.
+	Opened bool
 }
 
 // Metadata fetches a secret's metadata. A secret that is gone comes back as
 // an *Error with status 410 that AsGone can read.
 func (c *Client) Metadata(ctx context.Context, publicID, metadataToken string) (*Metadata, error) {
 	var body struct {
-		EncryptedMeta string  `json:"encrypted_meta"`
-		BlobSize      int64   `json:"blob_size"`
-		BurnAfterRead bool    `json:"burn_after_read"`
-		ExpiresAt     string  `json:"expires_at"`
-		CreatedAt     string  `json:"created_at"`
-		OpenedAt      *string `json:"opened_at"`
+		EncryptedMeta string `json:"encrypted_meta"`
+		BlobSize      int64  `json:"blob_size"`
+		BurnAfterRead bool   `json:"burn_after_read"`
+		ExpiresAt     string `json:"expires_at"`
+		CreatedAt     string `json:"created_at"`
+		Opened        bool   `json:"opened"`
+		// Older servers send when a recipient first opened it instead, and
+		// only then; that it is there is all that is read.
+		OpenedAt *string `json:"opened_at"`
 	}
 	headers := http.Header{headerMetadataToken: {metadataToken}}
 	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/secrets/"+publicID+"/meta", headers, nil, &body); err != nil {
@@ -144,13 +133,10 @@ func (c *Client) Metadata(ctx context.Context, publicID, metadataToken string) (
 	if err != nil {
 		return nil, fmt.Errorf("metadata created_at: %w", err)
 	}
-	meta := &Metadata{EncryptedMeta: body.EncryptedMeta, BlobSize: body.BlobSize, BurnAfterRead: body.BurnAfterRead, ExpiresAt: expires, CreatedAt: created}
-	if body.OpenedAt != nil {
-		if t, err := time.Parse(time.RFC3339, *body.OpenedAt); err == nil {
-			meta.OpenedAt = &t
-		}
-	}
-	return meta, nil
+	return &Metadata{
+		EncryptedMeta: body.EncryptedMeta, BlobSize: body.BlobSize, BurnAfterRead: body.BurnAfterRead,
+		ExpiresAt: expires, CreatedAt: created, Opened: body.Opened || body.OpenedAt != nil,
+	}, nil
 }
 
 // RetrievalSession is a window of 15 minutes for reading the blob.

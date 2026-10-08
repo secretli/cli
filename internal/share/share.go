@@ -70,11 +70,13 @@ func (e *GoneError) Error() string {
 	return "this secret is gone: " + e.Gone.Outcome
 }
 
-// NotFoundError is a secret the server has no record of, not even a tombstone.
+// NotFoundError is a secret the server has no record of: a link to nothing,
+// or to a secret that expired, since the server tells what became of a secret
+// only until it would have expired.
 type NotFoundError struct{}
 
 func (*NotFoundError) Error() string {
-	return "this secret is gone: it was opened already, or it expired"
+	return "this secret is gone: it may have expired, been opened or been deleted"
 }
 
 // Link is a share link; ParseLink reads one as the web app prints it. Both
@@ -322,8 +324,9 @@ type Info struct {
 	EncryptedSize     int64
 	ExpiresAt         time.Time
 	CreatedAt         time.Time
-	// OpenedAt is when a recipient first opened a reusable secret, if one has.
-	OpenedAt *time.Time
+	// Opened is whether a recipient has opened a reusable secret. For a
+	// one-time secret it is false: opening it ends it.
+	Opened bool
 }
 
 // Inspect describes a live secret, or returns a *GoneError or *NotFoundError.
@@ -353,7 +356,7 @@ func Inspect(ctx context.Context, c *api.Client, link Link) (*Info, error) {
 		EncryptedSize:     meta.BlobSize,
 		ExpiresAt:         meta.ExpiresAt,
 		CreatedAt:         meta.CreatedAt,
-		OpenedAt:          meta.OpenedAt,
+		Opened:            meta.Opened,
 	}, nil
 }
 

@@ -1,7 +1,7 @@
 // Package sharetest is a fake Secretli server for tests: the slice of the
 // API the client talks to, with the rules the real handlers enforce on
-// parts, tokens and one-time secrets, tombstones for what is gone, and the
-// short-code transfer relay.
+// parts, tokens and one-time secrets, tombstones for what is gone that last
+// only until the secret would have expired, and the short-code transfer relay.
 package sharetest
 
 import (
@@ -33,7 +33,7 @@ type Server struct {
 	partSize int64
 	uploads  map[string]*upload
 	secrets  map[string]*secret
-	gone     map[string]map[string]any
+	gone     map[string]*tombstone
 	sessions map[string]string // session token -> public id
 	relay    *relay
 }
@@ -62,7 +62,16 @@ type secret struct {
 	expires  time.Time
 	created  time.Time
 	consumed bool
-	openedAt *time.Time
+	opened   bool
+}
+
+// tombstone is what the server remembers of a secret that is gone, for whoever
+// holds its metadata token, until the secret's own expiry.
+type tombstone struct {
+	metadataToken string
+	outcome       string
+	burnAfterRead bool
+	expires       time.Time
 }
 
 // New starts a fake server whose upload sessions hand out this part size.
@@ -71,7 +80,7 @@ func New(partSize int64) *Server {
 		partSize: partSize,
 		uploads:  map[string]*upload{},
 		secrets:  map[string]*secret{},
-		gone:     map[string]map[string]any{},
+		gone:     map[string]*tombstone{},
 		sessions: map[string]string{},
 		relay:    newRelay(),
 	}
@@ -105,6 +114,40 @@ func (s *Server) Secrets() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.secrets)
+}
+
+// Expire lets every secret reach its expiry, and with it the note of what
+// became of the ones that are gone: from here on they are all unknown.
+func (s *Server) Expire() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	past := time.Now().Add(-time.Minute)
+	for _, sec := range s.secrets {
+		sec.expires = past
+	}
+	for _, tomb := range s.gone {
+		tomb.expires = past
+	}
+}
+
+// live is the secret behind a public id, unless it is gone or its time is up.
+func (s *Server) live(id string) (*secret, bool) {
+	sec, ok := s.secrets[id]
+	if !ok || time.Now().After(sec.expires) || (sec.req.BurnAfterRead && sec.consumed) {
+		return nil, false
+	}
+	return sec, true
+}
+
+// notLive answers for a secret that is not live: 410 with what became of it
+// to whoever holds its metadata token, until it would have expired, and 404
+// for everything else, an expired secret and an unknown one alike.
+func (s *Server) notLive(w http.ResponseWriter, id, metadataToken string) {
+	if tomb, ok := s.gone[id]; ok && time.Now().Before(tomb.expires) && tomb.metadataToken == metadataToken {
+		writeError(w, 410, "secret is gone", map[string]any{"outcome": tomb.outcome, "burn_after_read": tomb.burnAfterRead})
+		return
+	}
+	writeError(w, 404, "secret not found", nil)
 }
 
 func randomToken() string {
@@ -228,41 +271,28 @@ func (s *Server) metadata(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := r.PathValue("id")
-	sec, ok := s.secrets[id]
-	if !ok || (sec.req.BurnAfterRead && sec.consumed) {
-		if tomb, ok := s.gone[id]; ok && tomb["metadata_token"] == r.Header.Get("X-Metadata-Token") {
-			details := map[string]any{}
-			for k, v := range tomb {
-				if k != "metadata_token" {
-					details[k] = v
-				}
-			}
-			writeError(w, 410, "secret is gone", details)
-			return
-		}
-		writeError(w, 404, "secret not found", nil)
+	sec, ok := s.live(id)
+	if !ok {
+		s.notLive(w, id, r.Header.Get("X-Metadata-Token"))
 		return
 	}
 	if r.Header.Get("X-Metadata-Token") != sec.req.MetadataToken {
 		writeError(w, 403, "invalid token", nil)
 		return
 	}
-	body := map[string]any{
+	writeJSON(w, 200, map[string]any{
 		"encrypted_meta": sec.req.EncryptedMeta, "blob_size": len(sec.blob), "burn_after_read": sec.req.BurnAfterRead,
 		"expires_at": sec.expires.UTC().Format(time.RFC3339), "created_at": sec.created.UTC().Format(time.RFC3339),
-	}
-	if sec.openedAt != nil {
-		body["opened_at"] = sec.openedAt.UTC().Format(time.RFC3339)
-	}
-	writeJSON(w, 200, body)
+		"opened": sec.opened,
+	})
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := r.PathValue("id")
-	sec, ok := s.secrets[id]
-	if !ok || (sec.req.BurnAfterRead && sec.consumed) {
+	sec, ok := s.live(id)
+	if !ok {
 		writeError(w, 404, "secret not found", nil)
 		return
 	}
@@ -270,17 +300,15 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "invalid blob token", nil)
 		return
 	}
+	// The owner's own look at a reusable secret is not an opening. A one-time
+	// secret is opened by whoever comes first, the owner included.
 	byOwner := r.Header.Get("X-Deletion-Token") != "" && r.Header.Get("X-Deletion-Token") == sec.req.DeletionToken
 	now := time.Now()
 	if sec.req.BurnAfterRead {
 		sec.consumed = true
-		tomb := map[string]any{"metadata_token": sec.req.MetadataToken, "outcome": "opened", "burn_after_read": true, "ended_at": now.UTC().Format(time.RFC3339), "opened_by_owner": byOwner}
-		if !byOwner {
-			tomb["first_opened_at"] = now.UTC().Format(time.RFC3339)
-		}
-		s.gone[id] = tomb
-	} else if !byOwner && sec.openedAt == nil {
-		sec.openedAt = &now
+		s.gone[id] = &tombstone{metadataToken: sec.req.MetadataToken, outcome: "opened", burnAfterRead: true, expires: sec.expires}
+	} else if !byOwner {
+		sec.opened = true
 	}
 	token := randomToken()
 	s.sessions[token] = id
@@ -314,9 +342,9 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := r.PathValue("id")
-	sec, ok := s.secrets[id]
+	sec, ok := s.live(id)
 	if !ok {
-		writeError(w, 404, "secret not found", nil)
+		s.notLive(w, id, r.Header.Get("X-Metadata-Token"))
 		return
 	}
 	if r.Header.Get("X-Metadata-Token") != sec.req.MetadataToken || r.Header.Get("X-Deletion-Token") != sec.req.DeletionToken {
@@ -324,6 +352,6 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.secrets, id)
-	s.gone[id] = map[string]any{"metadata_token": sec.req.MetadataToken, "outcome": "deleted", "burn_after_read": sec.req.BurnAfterRead, "ended_at": time.Now().UTC().Format(time.RFC3339), "opened_by_owner": false}
+	s.gone[id] = &tombstone{metadataToken: sec.req.MetadataToken, outcome: "deleted", burnAfterRead: sec.req.BurnAfterRead, expires: sec.expires}
 	w.WriteHeader(204)
 }
