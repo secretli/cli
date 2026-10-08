@@ -204,11 +204,85 @@ func TestAnExpiredSecretIsJustNotFound(t *testing.T) {
 	}
 	fake.Expire()
 
-	// Not found, like a link to nothing, and the same for every command.
+	// Not found, like a link to nothing, and the same for the commands that
+	// open or delete it. status tells it as a state, which has its own test.
 	const notFound = "secretli: this secret is gone: it may have expired, been opened or been deleted\n"
-	for _, args := range [][]string{{"status", shared.OwnerLink}, {"open", shared.Link, "--yes"}, {"delete", shared.OwnerLink, "--yes"}} {
+	for _, args := range [][]string{{"open", shared.Link, "--yes"}, {"delete", shared.OwnerLink, "--yes"}} {
 		if stdout, stderr, code := runCLI(t, "", args...); code != ExitGone || stdout != "" || stderr != notFound {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q", args[0], code, stdout, stderr)
 		}
+	}
+}
+
+// unknownLink is a link to a secret that was never uploaded to this server.
+func unknownLink(t *testing.T, origin string) (owner, recipient string) {
+	t.Helper()
+	base, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base.Encoded()
+	l := share.Link{Origin: origin, Secret: enc.ShareSecret, DeletionToken: enc.DeletionToken}
+	return l.String(), l.Recipient().String()
+}
+
+// An expired secret and a link to nothing get the same plain 404, and the
+// server cannot tell why. status says the secret is gone and nothing more,
+// with the exit code 4, so that a script can always count on the state being
+// live or gone. The other commands keep failing with an error.
+func TestStatusOfALinkTheServerHasNoRecordOfIsGone(t *testing.T) {
+	srv := fakeServer(t)
+	cases := []struct {
+		name  string
+		links func(t *testing.T) (owner, recipient string)
+	}{
+		{"an expired secret", func(t *testing.T) (string, string) {
+			fake := srv.Fake()
+			if fake == nil {
+				t.Skip("a real server cannot be made to expire its secrets")
+			}
+			stdout, stderr, code := runCLI(t, "the launch code\n", "share", "--server="+srv.URL, "--json")
+			var shared struct {
+				Link      string `json:"link"`
+				OwnerLink string `json:"owner_link"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &shared); err != nil || code != 0 {
+				t.Fatalf("share: exit %d, %v, stdout %q, stderr %q", code, err, stdout, stderr)
+			}
+			fake.Expire()
+			return shared.OwnerLink, shared.Link
+		}},
+		{"a link to nothing", func(t *testing.T) (string, string) { return unknownLink(t, srv.URL) }},
+		{"a plain 404", func(t *testing.T) (string, string) {
+			return stubbed(t, http.StatusNotFound, `{"error":"secret not found"}`)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			owner, recipient := tc.links(t)
+
+			for who, link := range map[string]string{"owner": owner, "recipient": recipient} {
+				stdout, stderr, code := runCLI(t, "", "status", link, "--json")
+				if code != ExitGone || stdout != "{\"state\":\"gone\"}\n" || stderr != "" {
+					t.Errorf("%s: status --json: exit %d, stdout %q, stderr %q, want the state alone", who, code, stdout, stderr)
+				}
+
+				stdout, stderr, code = runCLI(t, "", "status", link)
+				if code != ExitGone || stdout != "This secret is gone: it may have expired, been opened or been deleted.\n" || stderr != "" {
+					t.Errorf("%s: status: exit %d, stdout %q, stderr %q", who, code, stdout, stderr)
+				}
+			}
+
+			// open and delete are errors still, as JSON too: the error and its
+			// code, and no state, since there is no outcome either.
+			for _, args := range [][]string{{"open", recipient, "--json"}, {"delete", owner, "--yes", "--json"}} {
+				stdout, _, code := runCLI(t, "", args...)
+				var failure map[string]any
+				if err := json.Unmarshal([]byte(stdout), &failure); err != nil || code != ExitGone || len(failure) != 2 ||
+					failure["code"] != float64(ExitGone) || failure["error"] != "this secret is gone: it may have expired, been opened or been deleted" {
+					t.Errorf("%s --json: exit %d, %v, stdout %q, want the error and the code alone", args[0], code, err, stdout)
+				}
+			}
+		})
 	}
 }

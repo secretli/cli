@@ -108,3 +108,8 @@ func goneSentence(g api.Gone, owner bool) string {
 	}
 	return "This secret is gone (" + g.Outcome + ")."
 }
+
+// notFoundSentence is what status says of a link the server has no record of.
+// An expired secret and a link to nothing get the same 404, so it can only
+// list what may have become of the secret.
+const notFoundSentence = "This secret is gone: it may have expired, been opened or been deleted."
