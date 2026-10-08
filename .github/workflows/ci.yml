@@ -67,7 +67,7 @@ jobs:
           # Raised rate limits: the tests send many requests from one address.
           docker run -d --name secretli-server --network host \
             -e DATABASE_URL='postgres://secretli:secretli@localhost:5432/secretli?sslmode=disable' \
-            -e S3_ENDPOINT=localhost:8333 -e S3_ACCESS_KEY=admin -e S3_SECRET_KEY=admin -e S3_USE_SSL=false \
+            -e S3_ENDPOINT=http://localhost:8333 -e S3_BUCKET=secretli -e S3_ACCESS_KEY=admin -e S3_SECRET_KEY=admin \
             -e SERVER_PORT=8080 -e RATE_LIMIT_MULTIPLIER=100 \
             ghcr.io/secretli/server:main
           for i in {1..60}; do
