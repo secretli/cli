@@ -180,6 +180,21 @@ func TestStatusReadsTheAnswersOfOlderAndNewerServers(t *testing.T) {
 	}
 }
 
+func TestOwnerCommandsOnAGoneSecretSpeakToTheOwner(t *testing.T) {
+	owner, recipient := stubbed(t, http.StatusGone, `{"error":"secret is gone","details":{"outcome":"deleted","burn_after_read":false}}`)
+
+	for _, args := range [][]string{{"open", owner}, {"delete", owner, "--yes"}} {
+		_, stderr, code := runCLI(t, "", args...)
+		if code != ExitGone || !strings.Contains(stderr, "You deleted this secret.") {
+			t.Errorf("%s with the owner link: exit %d, stderr %q, want the owner's sentence", args[0], code, stderr)
+		}
+	}
+	_, stderr, code := runCLI(t, "", "open", recipient)
+	if code != ExitGone || !strings.Contains(stderr, "The sender deleted this secret.") {
+		t.Errorf("open with the recipient's link: exit %d, stderr %q, want the recipient's sentence", code, stderr)
+	}
+}
+
 func TestAnExpiredSecretIsJustNotFound(t *testing.T) {
 	srv := fakeServer(t)
 	fake := srv.Fake()
