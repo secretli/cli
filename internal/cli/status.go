@@ -19,9 +19,10 @@ func newStatusCmd(e *env) *cobra.Command {
 password or not, when it was sent and when it expires. Nothing is opened, so
 a one-time secret stays unopened.
 
-For a secret that is gone it tells what happened: opened or deleted. The exit
-code is 4 then, so scripts can tell. An expired secret is simply not found,
-which exits with 4 too.`,
+For a secret that is gone it tells what happened: opened or deleted. An
+expired secret is simply not found, like a link to nothing, so it is gone with
+no word on why. The exit code is 4 for all of them, so scripts can tell, and
+with --json the state is always live or gone.`,
 		Example: `  secretli status 'https://secretli.app/s#…!…'
   secretli status "$LINK" --json | jq -r .state`,
 		Args:              cobra.MaximumNArgs(1),
@@ -58,6 +59,19 @@ func (e *env) status(ctx context.Context, args []string) error {
 			}
 		} else {
 			_, _ = fmt.Fprintln(e.stdout, goneSentence(gone.Gone, link.IsOwner()))
+		}
+		return &exitWith{code: ExitGone}
+	}
+	// An expired secret and a link to nothing both get a 404, so there is no
+	// outcome to tell. Scripts still get the state they branch on.
+	var notFound *share.NotFoundError
+	if errors.As(err, &notFound) {
+		if e.json {
+			if err := e.emitJSON(map[string]any{"state": "gone"}); err != nil {
+				return err
+			}
+		} else {
+			_, _ = fmt.Fprintln(e.stdout, notFoundSentence)
 		}
 		return &exitWith{code: ExitGone}
 	}

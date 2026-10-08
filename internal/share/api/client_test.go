@@ -24,38 +24,30 @@ func answering(t *testing.T, status int, body string) *api.Client {
 	return api.New(srv.URL)
 }
 
-// liveSecret is a live secret's metadata as the servers send it; extra adds
-// fields to it.
-func liveSecret(burnAfterRead bool, extra string) string {
-	return fmt.Sprintf(`{"encrypted_meta":"v2$abc","blob_size":359,"burn_after_read":%t,"expires_at":"2026-10-08T20:14:56Z","created_at":"2026-10-08T20:09:56Z"%s}`, burnAfterRead, extra)
+// liveSecret is a live secret's metadata as the server sends it.
+func liveSecret(burnAfterRead, opened bool) string {
+	return fmt.Sprintf(`{"encrypted_meta":"v2$abc","blob_size":359,"burn_after_read":%t,"expires_at":"2026-10-08T20:14:56Z","created_at":"2026-10-08T20:09:56Z","opened":%t}`, burnAfterRead, opened)
 }
 
-// The server used to tell when a recipient first opened a reusable secret
-// (opened_at) and now only tells that one did (opened). The client reads both.
-func TestMetadataReadsOpenedFromOlderAndNewerServers(t *testing.T) {
+// The server tells that a recipient opened a reusable secret, not when.
+func TestMetadataReadsOpened(t *testing.T) {
 	cases := []struct {
-		name string
-		body string
-		want bool
+		name          string
+		burnAfterRead bool
+		opened        bool
 	}{
-		{"newer, opened", liveSecret(false, `,"opened":true`), true},
-		{"newer, not opened", liveSecret(false, `,"opened":false`), false},
-		{"newer, one-time", liveSecret(true, `,"opened":false`), false},
-		{"older, opened", liveSecret(false, `,"opened_at":"2026-10-08T20:09:56Z"`), true},
-		{"older, not opened", liveSecret(false, ``), false},
-		{"older, one-time", liveSecret(true, ``), false},
-		{"older, null", liveSecret(false, `,"opened_at":null`), false},
-		// Its being there is what counts; the time is never read.
-		{"older, a time nobody can read", liveSecret(false, `,"opened_at":"some day"`), true},
+		{"reusable and opened", false, true},
+		{"reusable and not opened", false, false},
+		{"one-time", true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			meta, err := answering(t, http.StatusOK, tc.body).Metadata(context.Background(), "id", "token")
+			meta, err := answering(t, http.StatusOK, liveSecret(tc.burnAfterRead, tc.opened)).Metadata(context.Background(), "id", "token")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if meta.Opened != tc.want {
-				t.Errorf("Opened = %t, want %t", meta.Opened, tc.want)
+			if meta.Opened != tc.opened || meta.BurnAfterRead != tc.burnAfterRead {
+				t.Errorf("Opened = %t, BurnAfterRead = %t, want %t, %t", meta.Opened, meta.BurnAfterRead, tc.opened, tc.burnAfterRead)
 			}
 			// Nothing else about the answer depends on it.
 			if meta.EncryptedMeta != "v2$abc" || meta.BlobSize != 359 || !meta.ExpiresAt.Equal(time.Date(2026, 10, 8, 20, 14, 56, 0, time.UTC)) || !meta.CreatedAt.Equal(time.Date(2026, 10, 8, 20, 9, 56, 0, time.UTC)) {
@@ -65,25 +57,20 @@ func TestMetadataReadsOpenedFromOlderAndNewerServers(t *testing.T) {
 	}
 }
 
-// What the server tells of a secret that is gone used to hold times and who
-// opened it, and an expired secret was gone too; now it is the outcome and
-// whether the secret was one-time, and an expired secret is not found. Only
-// the outcome is needed, and the same answer comes for deleting.
-func TestAsGoneReadsOlderAndNewerServers(t *testing.T) {
+// What the server tells of a secret that is gone is its outcome and whether it
+// was one-time, and the same answer comes for deleting. An expired secret is
+// not found, which says nothing about it.
+func TestAsGoneReadsTheStoryOfASecretThatIsGone(t *testing.T) {
 	cases := []struct {
 		name   string
 		status int
 		body   string
 		want   *api.Gone // nil: not an answer about a secret that is gone
 	}{
-		{"newer, opened", 410, `{"error":"secret is gone","details":{"outcome":"opened","burn_after_read":true}}`, &api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"newer, deleted", 410, `{"error":"secret is gone","details":{"outcome":"deleted","burn_after_read":false}}`, &api.Gone{Outcome: "deleted"}},
-		{"newer, one-time and deleted", 410, `{"error":"secret is gone","details":{"outcome":"deleted","burn_after_read":true}}`, &api.Gone{Outcome: "deleted", BurnAfterRead: true}},
-		{"older, opened by a recipient", 410, `{"error":"secret is gone","details":{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"opened"}}`, &api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"older, opened by its owner", 410, `{"error":"secret is gone","details":{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","opened_by_owner":true,"outcome":"opened"}}`, &api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"older, deleted", 410, `{"error":"secret is gone","details":{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"deleted"}}`, &api.Gone{Outcome: "deleted", BurnAfterRead: true}},
-		{"older, expired", 410, `{"error":"secret is gone","details":{"burn_after_read":false,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"expired"}}`, &api.Gone{Outcome: "expired"}},
-		{"older, a time nobody can read", 410, `{"error":"secret is gone","details":{"burn_after_read":true,"ended_at":"some day","outcome":"opened"}}`, &api.Gone{Outcome: "opened", BurnAfterRead: true}},
+		{"opened", 410, `{"error":"secret is gone","details":{"outcome":"opened","burn_after_read":true}}`, &api.Gone{Outcome: "opened", BurnAfterRead: true}},
+		{"deleted", 410, `{"error":"secret is gone","details":{"outcome":"deleted","burn_after_read":false}}`, &api.Gone{Outcome: "deleted"}},
+		{"one-time and deleted", 410, `{"error":"secret is gone","details":{"outcome":"deleted","burn_after_read":true}}`, &api.Gone{Outcome: "deleted", BurnAfterRead: true}},
+		{"an outcome it has no word for", 410, `{"error":"secret is gone","details":{"outcome":"vanished","burn_after_read":false}}`, &api.Gone{Outcome: "vanished"}},
 		{"no word on whether it was one-time", 410, `{"error":"secret is gone","details":{"outcome":"opened"}}`, &api.Gone{Outcome: "opened"}},
 		{"no outcome", 410, `{"error":"secret is gone","details":{"burn_after_read":true}}`, nil},
 		{"no details", 410, `{"error":"secret is gone"}`, nil},

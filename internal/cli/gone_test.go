@@ -19,7 +19,6 @@ import (
 func TestGoneSentences(t *testing.T) {
 	opened := api.Gone{Outcome: "opened", BurnAfterRead: true}
 	deleted := api.Gone{Outcome: "deleted"}
-	expired := api.Gone{Outcome: "expired"} // only older servers say so
 	cases := []struct {
 		gone  api.Gone
 		owner bool
@@ -29,8 +28,6 @@ func TestGoneSentences(t *testing.T) {
 		{opened, false, "This secret was already opened. If that wasn't you, tell the sender: the link may have reached someone else."},
 		{deleted, true, "You deleted this secret."},
 		{deleted, false, "The sender deleted this secret. Ask them for a new link if you still need it."},
-		{expired, true, "Your secret expired. Nothing is left on the server."},
-		{expired, false, "This secret expired. Nothing is left on the server, so ask the sender for a new link if you still need it."},
 		{api.Gone{Outcome: "vanished"}, false, "This secret is gone (vanished)."},
 	}
 	for _, tc := range cases {
@@ -92,33 +89,29 @@ func stubbed(t *testing.T, status int, body string) (owner, recipient string) {
 	return l.String(), l.Recipient().String()
 }
 
-func liveAnswer(burnAfterRead bool, extra string) string {
-	return fmt.Sprintf(`{"encrypted_meta":"META","blob_size":359,"burn_after_read":%t,"expires_at":"2026-10-09T20:14:56Z","created_at":"2026-10-08T20:09:56Z"%s}`, burnAfterRead, extra)
+func liveAnswer(burnAfterRead, opened bool) string {
+	return fmt.Sprintf(`{"encrypted_meta":"META","blob_size":359,"burn_after_read":%t,"expires_at":"2026-10-09T20:14:56Z","created_at":"2026-10-08T20:09:56Z","opened":%t}`, burnAfterRead, opened)
 }
 
-// The command reads the answers of the server as it was, with times and
-// names, and as it is now, whichever server the other tests run against: the
-// live ones first, then the 410 answers. Either way it prints no time.
-func TestStatusReadsTheAnswersOfOlderAndNewerServers(t *testing.T) {
+// The command reads the answers of the server, the live ones first, then the
+// 410 answers. It prints no time of an opening or a deletion: there is none.
+func TestStatusTellsWhatBecameOfASecretWithoutTimes(t *testing.T) {
 	live := []struct {
-		name   string
-		body   string
-		opened bool
+		name          string
+		burnAfterRead bool
+		opened        bool
 	}{
-		{"older, reusable and opened", liveAnswer(false, `,"opened_at":"2026-10-08T20:11:00Z"`), true},
-		{"older, reusable and not opened", liveAnswer(false, ``), false},
-		{"older, one-time", liveAnswer(true, ``), false},
-		{"newer, reusable and opened", liveAnswer(false, `,"opened":true`), true},
-		{"newer, reusable and not opened", liveAnswer(false, `,"opened":false`), false},
-		{"newer, one-time", liveAnswer(true, `,"opened":false`), false},
+		{"reusable and opened", false, true},
+		{"reusable and not opened", false, false},
+		{"one-time", true, false},
 	}
 	for _, tc := range live {
 		t.Run(tc.name, func(t *testing.T) {
-			owner, _ := stubbed(t, http.StatusOK, tc.body)
+			owner, _ := stubbed(t, http.StatusOK, liveAnswer(tc.burnAfterRead, tc.opened))
 
 			stdout, stderr, code := runCLI(t, "", "status", owner, "--json")
 			var status map[string]any
-			if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != tc.opened {
+			if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != tc.opened || status["reusable"] != !tc.burnAfterRead {
 				t.Fatalf("status --json: exit %d, %v, stdout %q, stderr %q", code, err, stdout, stderr)
 			}
 			if _, ok := status["opened_at"]; ok {
@@ -136,19 +129,17 @@ func TestStatusReadsTheAnswersOfOlderAndNewerServers(t *testing.T) {
 		})
 	}
 
-	// The 410 answers as the real server gave them, and as it gives them
-	// now: only the outcome and whether the secret was one-time are read.
+	// The 410 answers: the outcome and whether the secret was one-time. An
+	// outcome the command has no sentence for is still told as gone.
 	gone := []struct {
 		name    string
 		details string
 		gone    api.Gone
 	}{
-		{"older, opened by a recipient", `{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"opened"}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"older, opened by its owner", `{"burn_after_read":true,"ended_at":"2026-10-08T20:09:56Z","opened_by_owner":true,"outcome":"opened"}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"older, deleted after being opened", `{"burn_after_read":false,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"deleted"}`, api.Gone{Outcome: "deleted"}},
-		{"older, expired", `{"burn_after_read":false,"ended_at":"2026-10-08T20:09:56Z","first_opened_at":"2026-10-08T20:09:56Z","opened_by_owner":false,"outcome":"expired"}`, api.Gone{Outcome: "expired"}},
-		{"newer, opened", `{"outcome":"opened","burn_after_read":true}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
-		{"newer, deleted", `{"outcome":"deleted","burn_after_read":false}`, api.Gone{Outcome: "deleted"}},
+		{"opened", `{"outcome":"opened","burn_after_read":true}`, api.Gone{Outcome: "opened", BurnAfterRead: true}},
+		{"deleted", `{"outcome":"deleted","burn_after_read":false}`, api.Gone{Outcome: "deleted"}},
+		{"deleted, one-time", `{"outcome":"deleted","burn_after_read":true}`, api.Gone{Outcome: "deleted", BurnAfterRead: true}},
+		{"an outcome it has no word for", `{"outcome":"vanished","burn_after_read":false}`, api.Gone{Outcome: "vanished"}},
 	}
 	digit := regexp.MustCompile(`\d`)
 	for _, tc := range gone {
@@ -213,11 +204,85 @@ func TestAnExpiredSecretIsJustNotFound(t *testing.T) {
 	}
 	fake.Expire()
 
-	// Not found, like a link to nothing, and the same for every command.
+	// Not found, like a link to nothing, and the same for the commands that
+	// open or delete it. status tells it as a state, which has its own test.
 	const notFound = "secretli: this secret is gone: it may have expired, been opened or been deleted\n"
-	for _, args := range [][]string{{"status", shared.OwnerLink}, {"open", shared.Link, "--yes"}, {"delete", shared.OwnerLink, "--yes"}} {
+	for _, args := range [][]string{{"open", shared.Link, "--yes"}, {"delete", shared.OwnerLink, "--yes"}} {
 		if stdout, stderr, code := runCLI(t, "", args...); code != ExitGone || stdout != "" || stderr != notFound {
 			t.Errorf("%s: exit %d, stdout %q, stderr %q", args[0], code, stdout, stderr)
 		}
+	}
+}
+
+// unknownLink is a link to a secret that was never uploaded to this server.
+func unknownLink(t *testing.T, origin string) (owner, recipient string) {
+	t.Helper()
+	base, err := keys.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base.Encoded()
+	l := share.Link{Origin: origin, Secret: enc.ShareSecret, DeletionToken: enc.DeletionToken}
+	return l.String(), l.Recipient().String()
+}
+
+// An expired secret and a link to nothing get the same plain 404, and the
+// server cannot tell why. status says the secret is gone and nothing more,
+// with the exit code 4, so that a script can always count on the state being
+// live or gone. The other commands keep failing with an error.
+func TestStatusOfALinkTheServerHasNoRecordOfIsGone(t *testing.T) {
+	srv := fakeServer(t)
+	cases := []struct {
+		name  string
+		links func(t *testing.T) (owner, recipient string)
+	}{
+		{"an expired secret", func(t *testing.T) (string, string) {
+			fake := srv.Fake()
+			if fake == nil {
+				t.Skip("a real server cannot be made to expire its secrets")
+			}
+			stdout, stderr, code := runCLI(t, "the launch code\n", "share", "--server="+srv.URL, "--json")
+			var shared struct {
+				Link      string `json:"link"`
+				OwnerLink string `json:"owner_link"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &shared); err != nil || code != 0 {
+				t.Fatalf("share: exit %d, %v, stdout %q, stderr %q", code, err, stdout, stderr)
+			}
+			fake.Expire()
+			return shared.OwnerLink, shared.Link
+		}},
+		{"a link to nothing", func(t *testing.T) (string, string) { return unknownLink(t, srv.URL) }},
+		{"a plain 404", func(t *testing.T) (string, string) {
+			return stubbed(t, http.StatusNotFound, `{"error":"secret not found"}`)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			owner, recipient := tc.links(t)
+
+			for who, link := range map[string]string{"owner": owner, "recipient": recipient} {
+				stdout, stderr, code := runCLI(t, "", "status", link, "--json")
+				if code != ExitGone || stdout != "{\"state\":\"gone\"}\n" || stderr != "" {
+					t.Errorf("%s: status --json: exit %d, stdout %q, stderr %q, want the state alone", who, code, stdout, stderr)
+				}
+
+				stdout, stderr, code = runCLI(t, "", "status", link)
+				if code != ExitGone || stdout != "This secret is gone: it may have expired, been opened or been deleted.\n" || stderr != "" {
+					t.Errorf("%s: status: exit %d, stdout %q, stderr %q", who, code, stdout, stderr)
+				}
+			}
+
+			// open and delete are errors still, as JSON too: the error and its
+			// code, and no state, since there is no outcome either.
+			for _, args := range [][]string{{"open", recipient, "--json"}, {"delete", owner, "--yes", "--json"}} {
+				stdout, _, code := runCLI(t, "", args...)
+				var failure map[string]any
+				if err := json.Unmarshal([]byte(stdout), &failure); err != nil || code != ExitGone || len(failure) != 2 ||
+					failure["code"] != float64(ExitGone) || failure["error"] != "this secret is gone: it may have expired, been opened or been deleted" {
+					t.Errorf("%s --json: exit %d, %v, stdout %q, want the error and the code alone", args[0], code, err, stdout)
+				}
+			}
+		})
 	}
 }
