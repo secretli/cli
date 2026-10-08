@@ -116,7 +116,7 @@ The tests run against a fake server that enforces the real one's rules on upload
 docker compose -f ../server/docker/docker-compose.yml up -d postgres seaweedfs createbucket
 docker run -d --name secretli-test --network host -e RATE_LIMIT_MULTIPLIER=100 \
   -e DATABASE_URL='postgres://secretli:secretli@localhost:5432/secretli?sslmode=disable' \
-  -e S3_ENDPOINT=localhost:8333 -e S3_ACCESS_KEY=admin -e S3_SECRET_KEY=admin -e S3_USE_SSL=false \
+  -e S3_ENDPOINT=http://localhost:8333 -e S3_BUCKET=secretli -e S3_ACCESS_KEY=admin -e S3_SECRET_KEY=admin \
   ghcr.io/secretli/server:main
 SECRETLI_TEST_SERVER=http://localhost:8080 make test
 ```
