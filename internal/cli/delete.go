@@ -51,7 +51,7 @@ func (e *env) delete(ctx context.Context, args []string, yes bool) error {
 		}
 	}
 	if err := share.Delete(ctx, e.client(link.Origin), link); err != nil {
-		return describeGone(err, true)
+		return err
 	}
 	if e.json {
 		return e.emitJSON(map[string]any{"deleted": true})

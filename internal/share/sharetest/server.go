@@ -1,7 +1,9 @@
 // Package sharetest is a fake Secretli server for tests: the slice of the
 // API the client talks to, with the rules the real handlers enforce on
-// parts, tokens and one-time secrets, tombstones for what is gone that last
-// only until the secret would have expired, and the short-code transfer relay.
+// parts, tokens and one-time secrets, and the short-code transfer relay. Like
+// the real server it keeps nothing about a secret that is gone: an opened
+// one-time secret, a deleted one and an expired one answer 404, as a link to
+// nothing does.
 package sharetest
 
 import (
@@ -33,7 +35,6 @@ type Server struct {
 	partSize int64
 	uploads  map[string]*upload
 	secrets  map[string]*secret
-	gone     map[string]*tombstone
 	sessions map[string]string // session token -> public id
 	relay    *relay
 }
@@ -65,22 +66,12 @@ type secret struct {
 	opened   bool
 }
 
-// tombstone is what the server remembers of a secret that is gone, for whoever
-// holds its metadata token, until the secret's own expiry.
-type tombstone struct {
-	metadataToken string
-	outcome       string
-	burnAfterRead bool
-	expires       time.Time
-}
-
 // New starts a fake server whose upload sessions hand out this part size.
 func New(partSize int64) *Server {
 	s := &Server{
 		partSize: partSize,
 		uploads:  map[string]*upload{},
 		secrets:  map[string]*secret{},
-		gone:     map[string]*tombstone{},
 		sessions: map[string]string{},
 		relay:    newRelay(),
 	}
@@ -133,17 +124,13 @@ func (s *Server) Secrets() int {
 	return len(s.secrets)
 }
 
-// Expire lets every secret reach its expiry, and with it the note of what
-// became of the ones that are gone: from here on they are all unknown.
+// Expire lets every secret reach its expiry.
 func (s *Server) Expire() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	past := time.Now().Add(-time.Minute)
 	for _, sec := range s.secrets {
 		sec.expires = past
-	}
-	for _, tomb := range s.gone {
-		tomb.expires = past
 	}
 }
 
@@ -154,17 +141,6 @@ func (s *Server) live(id string) (*secret, bool) {
 		return nil, false
 	}
 	return sec, true
-}
-
-// notLive answers for a secret that is not live: 410 with what became of it
-// to whoever holds its metadata token, until it would have expired, and 404
-// for everything else, an expired secret and an unknown one alike.
-func (s *Server) notLive(w http.ResponseWriter, id, metadataToken string) {
-	if tomb, ok := s.gone[id]; ok && time.Now().Before(tomb.expires) && tomb.metadataToken == metadataToken {
-		writeError(w, 410, "secret is gone", map[string]any{"outcome": tomb.outcome, "burn_after_read": tomb.burnAfterRead})
-		return
-	}
-	writeError(w, 404, "secret not found", nil)
 }
 
 func randomToken() string {
@@ -290,7 +266,7 @@ func (s *Server) metadata(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sec, ok := s.live(id)
 	if !ok {
-		s.notLive(w, id, r.Header.Get("X-Metadata-Token"))
+		writeError(w, 404, "secret not found", nil)
 		return
 	}
 	if r.Header.Get("X-Metadata-Token") != sec.req.MetadataToken {
@@ -323,7 +299,6 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	if sec.req.BurnAfterRead {
 		sec.consumed = true
-		s.gone[id] = &tombstone{metadataToken: sec.req.MetadataToken, outcome: "opened", burnAfterRead: true, expires: sec.expires}
 	} else if !byOwner {
 		sec.opened = true
 	}
@@ -361,7 +336,7 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sec, ok := s.live(id)
 	if !ok {
-		s.notLive(w, id, r.Header.Get("X-Metadata-Token"))
+		writeError(w, 404, "secret not found", nil)
 		return
 	}
 	if r.Header.Get("X-Metadata-Token") != sec.req.MetadataToken || r.Header.Get("X-Deletion-Token") != sec.req.DeletionToken {
@@ -369,6 +344,5 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.secrets, id)
-	s.gone[id] = &tombstone{metadataToken: sec.req.MetadataToken, outcome: "deleted", burnAfterRead: sec.req.BurnAfterRead, expires: sec.expires}
 	w.WriteHeader(204)
 }

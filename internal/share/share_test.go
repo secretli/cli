@@ -79,14 +79,14 @@ func TestShareAndOpenText(t *testing.T) {
 		t.Errorf("text = %q, opened = %+v", sink.text, opened)
 	}
 
-	// A one-time secret is gone once opened, and its link says so.
+	// A one-time secret is gone once opened, and its link finds nothing.
 	_, err = share.Inspect(ctx, c, recipient)
-	var gone *share.GoneError
-	if !errors.As(err, &gone) || gone.Gone.Outcome != "opened" || !gone.Gone.BurnAfterRead {
-		t.Fatalf("after opening: err = %v, want a GoneError with outcome opened", err)
+	var notFound *share.NotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("after opening: err = %v, want a NotFoundError", err)
 	}
-	if _, err := share.Open(ctx, c, recipient, "", &memorySink{}, nil); !errors.As(err, &gone) {
-		t.Errorf("second open: err = %v, want GoneError", err)
+	if _, err := share.Open(ctx, c, recipient, "", &memorySink{}, nil); !errors.As(err, &notFound) {
+		t.Errorf("second open: err = %v, want a NotFoundError", err)
 	}
 }
 
@@ -291,7 +291,7 @@ func TestOpenedMeansARecipientOpenedIt(t *testing.T) {
 	}
 }
 
-func TestOneTimeSecretOpenedByItsOwnerIsJustOpened(t *testing.T) {
+func TestOneTimeSecretOpenedByItsOwnerIsGoneForBothLinks(t *testing.T) {
 	ctx := context.Background()
 	c, _ := newClient(t, 32*1024*1024)
 	result, err := share.Share(ctx, c, share.Params{Text: []byte("mine")})
@@ -302,17 +302,17 @@ func TestOneTimeSecretOpenedByItsOwnerIsJustOpened(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The owner link and the recipient link are told the same story.
+	// The owner link finds nothing, the same as the recipient link.
 	for name, l := range map[string]share.Link{"owner link": result.Link, "recipient link": result.Link.Recipient()} {
 		_, err = share.Inspect(ctx, c, l)
-		var gone *share.GoneError
-		if !errors.As(err, &gone) || gone.Gone != (api.Gone{Outcome: "opened", BurnAfterRead: true}) {
-			t.Errorf("%s after the owner opened it: err = %v, want a GoneError, opened and one-time", name, err)
+		var notFound *share.NotFoundError
+		if !errors.As(err, &notFound) {
+			t.Errorf("%s after the owner opened it: err = %v, want a NotFoundError", name, err)
 		}
 	}
 }
 
-func TestDeleteNeedsTheOwnerLinkAndLeavesAStory(t *testing.T) {
+func TestDeleteNeedsTheOwnerLinkAndLeavesNothing(t *testing.T) {
 	ctx := context.Background()
 	c, srv := newClient(t, 32*1024*1024)
 	result, err := share.Share(ctx, c, share.Params{Text: []byte("bye")})
@@ -328,21 +328,22 @@ func TestDeleteNeedsTheOwnerLinkAndLeavesAStory(t *testing.T) {
 	if fake := srv.Fake(); fake != nil && fake.Secrets() != 0 {
 		t.Error("the secret is still on the server")
 	}
-	_, err = share.Inspect(ctx, c, result.Link)
-	var gone *share.GoneError
-	if !errors.As(err, &gone) || gone.Gone != (api.Gone{Outcome: "deleted", BurnAfterRead: true}) {
-		t.Errorf("after delete: err = %v, want GoneError deleted", err)
+	// Both links find nothing, and deleting again finds nothing either.
+	var notFound *share.NotFoundError
+	for name, l := range map[string]share.Link{"owner link": result.Link, "recipient link": result.Link.Recipient()} {
+		if _, err := share.Inspect(ctx, c, l); !errors.As(err, &notFound) {
+			t.Errorf("%s after delete: err = %v, want a NotFoundError", name, err)
+		}
 	}
-	// Deleting again is told the same story.
-	if err := share.Delete(ctx, c, result.Link); !errors.As(err, &gone) || gone.Gone.Outcome != "deleted" {
-		t.Errorf("second delete: err = %v, want GoneError deleted", err)
+	if err := share.Delete(ctx, c, result.Link); !errors.As(err, &notFound) {
+		t.Errorf("second delete: err = %v, want a NotFoundError", err)
 	}
 }
 
-// The server tells what became of a secret only until it would have expired;
-// after that, and for a secret that expired unopened, it knows nothing. A real
-// server cannot be made to wait, so this one is for the fake.
-func TestWhatBecameOfASecretIsKeptOnlyUntilItExpires(t *testing.T) {
+// An expired secret is not found, the same as one that was opened or deleted:
+// the server keeps nothing of any of them. A real server cannot be made to
+// wait, so this one is for the fake.
+func TestAnExpiredSecretIsNotFoundLikeAGoneOne(t *testing.T) {
 	ctx := context.Background()
 	c, srv := newClient(t, 32*1024*1024)
 	fake := srv.Fake()
@@ -357,35 +358,28 @@ func TestWhatBecameOfASecretIsKeptOnlyUntilItExpires(t *testing.T) {
 		}
 		return result.Link
 	}
-	opened, deleted, unopened := newSecret(), newSecret(), newSecret()
+	opened, deleted, expired := newSecret(), newSecret(), newSecret()
 	if _, err := share.Open(ctx, c, opened.Recipient(), "", &memorySink{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := share.Delete(ctx, c, deleted); err != nil {
 		t.Fatal(err)
 	}
-
-	var gone *share.GoneError
-	for name, l := range map[string]share.Link{"opened": opened, "deleted": deleted} {
-		if _, err := share.Inspect(ctx, c, l); !errors.As(err, &gone) || gone.Gone.Outcome != name {
-			t.Errorf("%s, before it expires: err = %v, want a GoneError", name, err)
-		}
-	}
-	if _, err := share.Inspect(ctx, c, unopened); err != nil {
-		t.Errorf("unopened, before it expires: err = %v", err)
+	if _, err := share.Inspect(ctx, c, expired); err != nil {
+		t.Fatalf("before it expires: err = %v", err)
 	}
 
 	fake.Expire()
 	var notFound *share.NotFoundError
-	for name, l := range map[string]share.Link{"opened": opened, "deleted": deleted, "unopened": unopened} {
+	for name, l := range map[string]share.Link{"opened": opened, "deleted": deleted, "expired": expired} {
 		if _, err := share.Inspect(ctx, c, l); !errors.As(err, &notFound) {
-			t.Errorf("%s, after it expired: err = %v, want a NotFoundError", name, err)
+			t.Errorf("%s: err = %v, want a NotFoundError", name, err)
 		}
 		if _, err := share.Open(ctx, c, l.Recipient(), "", &memorySink{}, nil); !errors.As(err, &notFound) {
-			t.Errorf("%s, opened after it expired: err = %v, want a NotFoundError", name, err)
+			t.Errorf("%s, opened: err = %v, want a NotFoundError", name, err)
 		}
 		if err := share.Delete(ctx, c, l); !errors.As(err, &notFound) {
-			t.Errorf("%s, deleted after it expired: err = %v, want a NotFoundError", name, err)
+			t.Errorf("%s, deleted: err = %v, want a NotFoundError", name, err)
 		}
 	}
 }

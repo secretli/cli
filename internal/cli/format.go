@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/secretli/cli/internal/share"
-	"github.com/secretli/cli/internal/share/api"
 )
 
 // formatMoment says a time the way a person would: "today at 19:53",
@@ -90,26 +89,8 @@ func describeInfo(info *share.Info, owner bool, now time.Time) string {
 	return s
 }
 
-// goneSentence tells what became of a secret, to its owner or a recipient,
-// in the web app's words. The server tells no times, and no difference
-// between the owner opening a one-time secret and a recipient doing so.
-func goneSentence(g api.Gone, owner bool) string {
-	switch g.Outcome {
-	case "opened":
-		if owner {
-			return "Your secret was opened. It was a one-time secret, so nothing is left on the server."
-		}
-		return "This secret was already opened. If that wasn't you, tell the sender: the link may have reached someone else."
-	case "deleted":
-		if owner {
-			return "You deleted this secret."
-		}
-		return "The sender deleted this secret. Ask them for a new link if you still need it."
-	}
-	return "This secret is gone (" + g.Outcome + ")."
-}
-
-// notFoundSentence is what status says of a link the server has no record of.
-// An expired secret and a link to nothing get the same 404, so it can only
-// list what may have become of the secret.
+// notFoundSentence is what status says of a secret that is gone. The server
+// keeps nothing about a secret once it was opened, deleted or has expired, and
+// answers the same 404 as for a link to nothing, to the owner and a recipient
+// alike, so it can only list what may have become of the secret.
 const notFoundSentence = "This secret is gone: it may have expired, been opened or been deleted."

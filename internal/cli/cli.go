@@ -196,13 +196,8 @@ func (e *env) report(err error) int {
 		return silent.code
 	}
 	code := exitCode(err)
-	var gone *share.GoneError
 	if e.json {
-		body := map[string]any{"error": message(err), "code": code}
-		if errors.As(err, &gone) {
-			body["outcome"] = gone.Gone.Outcome
-		}
-		_ = e.emitJSON(body)
+		_ = e.emitJSON(map[string]any{"error": message(err), "code": code})
 		return code
 	}
 	_, _ = fmt.Fprintf(e.stderr, "secretli: %s\n", message(err))
@@ -217,14 +212,13 @@ func exitCode(err error) int {
 	if !errors.As(err, &run) {
 		return ExitUsage
 	}
-	var gone *share.GoneError
 	var notFound *share.NotFoundError
 	var ended *transfer.EndedError
 	var apiErr *api.Error
 	switch {
 	case errors.Is(err, share.ErrPasswordRequired), errors.Is(err, share.ErrWrongPassword), errors.Is(err, transfer.ErrCodeMismatch):
 		return ExitPassword
-	case errors.As(err, &gone), errors.As(err, &notFound), errors.As(err, &ended),
+	case errors.As(err, &notFound), errors.As(err, &ended),
 		errors.Is(err, share.ErrNoSuchTransfer), errors.Is(err, share.ErrTransferClaimed):
 		return ExitGone
 	case errors.As(err, &apiErr) && (apiErr.Status == 0 || apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests):
@@ -236,16 +230,6 @@ func exitCode(err error) int {
 }
 
 func message(err error) string {
-	// A gone secret described for the owner is told in the owner's words;
-	// the plain error it wraps would read as if a recipient asked.
-	var described *describedGone
-	if errors.As(err, &described) {
-		return described.Error()
-	}
-	var gone *share.GoneError
-	if errors.As(err, &gone) {
-		return goneSentence(gone.Gone, false)
-	}
 	if errors.Is(err, context.Canceled) {
 		return "interrupted"
 	}
