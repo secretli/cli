@@ -75,7 +75,7 @@ func TestShareAndOpenText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sink.text) != "the launch code is 0000" || opened.Info.Kind != share.KindText || opened.Version != 3 {
+	if string(sink.text) != "the launch code is 0000" || opened.Info.Kind != share.KindText {
 		t.Errorf("text = %q, opened = %+v", sink.text, opened)
 	}
 
@@ -142,12 +142,8 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 
 	sink := &memorySink{}
 	var last int64
-	opened, err := share.Open(ctx, c, recipient, "hunter2", sink, func(done, _ int64) { last = done })
-	if err != nil {
+	if _, err := share.Open(ctx, c, recipient, "hunter2", sink, func(done, _ int64) { last = done }); err != nil {
 		t.Fatal(err)
-	}
-	if opened.Version != 3 {
-		t.Errorf("bundle version %d, want 3", opened.Version)
 	}
 	if !bytes.Equal(sink.files["big.bin"].Bytes(), big) || sink.files["notes.txt"].String() != "notes" {
 		t.Error("decrypted files differ from the originals")
@@ -204,7 +200,7 @@ func TestOpenReadsBundleVersion3AndOnlyTheChosenFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opened.Version != 3 || len(opened.Files) != 3 || len(sink.offered) != 3 || sink.offered[1].Name != "skipped.bin" {
+	if len(opened.Files) != 3 || len(sink.offered) != 3 || sink.offered[1].Name != "skipped.bin" {
 		t.Errorf("opened = %+v, offered %+v", opened, sink.offered)
 	}
 	if len(sink.files) != 2 || !bytes.Equal(sink.files["big.bin"].Bytes(), big) || sink.files["notes.txt"].String() != "notes" {
@@ -221,37 +217,8 @@ func TestOpenReadsBundleVersion3AndOnlyTheChosenFiles(t *testing.T) {
 	if opened, err = share.Open(ctx, c, l.Recipient(), "", sink, nil); err != nil {
 		t.Fatal(err)
 	}
-	if string(sink.text) != "hush" || sink.offered != nil || opened.Version != 3 || opened.Info.Kind != share.KindText {
+	if string(sink.text) != "hush" || sink.offered != nil || opened.Info.Kind != share.KindText {
 		t.Errorf("text = %q, offered %+v, opened %+v", sink.text, sink.offered, opened)
-	}
-}
-
-// Bundles from before version 3 still open, until no such secret can exist.
-func TestOpenReadsBundleVersion2(t *testing.T) {
-	ctx := context.Background()
-	c, srv := newClient(t, 32*1024*1024)
-	files := []bundle.Source{
-		{Name: "a.txt", Type: "text/plain", Size: 1, Reader: strings.NewReader("a")},
-		{Name: "b.txt", Type: "text/plain", Size: 2, Reader: strings.NewReader("bb")},
-	}
-	l := sharetest.ShareVersion2(t, srv.URL, "bundle", true, files...)
-	sink := &choosingSink{choose: []int{1}}
-	opened, err := share.Open(ctx, c, l.Recipient(), "", sink, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opened.Version != 2 || len(sink.offered) != 2 || len(sink.files) != 1 || sink.files["b.txt"].String() != "bb" {
-		t.Errorf("opened %+v, offered %+v, saved %d files", opened, sink.offered, len(sink.files))
-	}
-
-	note := []bundle.Source{{Name: "secret.txt", Type: "text/plain", Size: 4, Reader: strings.NewReader("hush")}}
-	l = sharetest.ShareVersion2(t, srv.URL, "text", true, note...)
-	sink = &choosingSink{}
-	if opened, err = share.Open(ctx, c, l.Recipient(), "", sink, nil); err != nil {
-		t.Fatal(err)
-	}
-	if string(sink.text) != "hush" || opened.Version != 2 {
-		t.Errorf("text = %q, opened %+v", sink.text, opened)
 	}
 }
 

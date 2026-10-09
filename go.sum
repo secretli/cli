@@ -6,8 +6,8 @@ github.com/gtank/ristretto255 v0.2.0/go.mod h1:OJ1ox/dWcp7sJ5grYDcZ+kkHYuj5nelW5
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
-github.com/secretli/format v0.4.0 h1:V+meeaK8cax3Ssw3R45onGm8NUT8saH196Zvqt1ERy0=
-github.com/secretli/format v0.4.0/go.mod h1:c56x44rx3mRfs2iewCjWszVL0vqQBS01NMHvXLiQuBo=
+github.com/secretli/format v0.5.0 h1:GSLqG1vui5F605ycvjwhw3VgqkY2j8dl7aBiq4Q9i6c=
+github.com/secretli/format v0.5.0/go.mod h1:c56x44rx3mRfs2iewCjWszVL0vqQBS01NMHvXLiQuBo=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
