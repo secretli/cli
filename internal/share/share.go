@@ -165,8 +165,9 @@ func Share(ctx context.Context, c *api.Client, p Params) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	bundleName := bundle.DefaultBundleName(names)
-	plan, err := bundle.NewPlan(sources, bundleName)
+	// Bundles are written in version 2 until the web app that people have
+	// reads version 3; Open reads both.
+	plan, err := bundle.NewPlan(sources, bundle.DefaultBundleName(names))
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +175,7 @@ func Share(ctx context.Context, c *api.Client, p Params) (*Result, error) {
 	if kind == KindText {
 		metaType = "text"
 	}
-	encryptedMeta, err := base.EncryptMeta(keys.Meta{Type: metaType, PasswordProtected: p.Password != "", BundleName: bundleName})
+	encryptedMeta, err := base.EncryptMeta(keys.Meta{Type: metaType, PasswordProtected: p.Password != ""})
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +319,6 @@ func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan
 // envelope decrypts with the link alone.
 type Info struct {
 	Kind              Kind
-	BundleName        string
 	PasswordProtected bool
 	Reusable          bool
 	EncryptedSize     int64
@@ -350,7 +350,6 @@ func Inspect(ctx context.Context, c *api.Client, link Link) (*Info, error) {
 	}
 	return &Info{
 		Kind:              kind,
-		BundleName:        clientMeta.BundleName,
 		PasswordProtected: clientMeta.PasswordProtected,
 		Reusable:          !meta.BurnAfterRead,
 		EncryptedSize:     meta.BlobSize,
@@ -366,20 +365,25 @@ type Sink interface {
 	Text(text []byte) error
 	// File is asked where a file's plaintext should go. The writer is
 	// closed when the file is complete.
-	File(file bundle.File) (io.WriteCloser, error)
+	File(file bundle.Entry) (io.WriteCloser, error)
 }
 
-// ManifestSink is a Sink that wants to see the manifest before anything is
-// decrypted, to check names and sizes while nothing has been written yet.
-type ManifestSink interface {
+// ChoosingSink is a Sink that sees the files before anything is decrypted,
+// to pick the ones it wants and to check names and sizes while nothing has
+// been written yet. Choose returns the indexes of the files to decrypt, nil
+// meaning all of them; only those reach File.
+type ChoosingSink interface {
 	Sink
-	Manifest(manifest *bundle.Manifest) error
+	Choose(ctx context.Context, files []bundle.Entry) ([]int, error)
 }
 
 // Opened is what Open found.
 type Opened struct {
-	Info     Info
-	Manifest *bundle.Manifest
+	Info Info
+	// Version is the bundle's: 3, or 2 for one written before the stream.
+	Version int
+	// Files lists every file of the bundle, chosen or not.
+	Files []bundle.Entry
 }
 
 // Open reads a secret, handing the content to sink. Opening a one-time
@@ -419,56 +423,58 @@ func Open(ctx context.Context, c *api.Client, link Link, password string, sink S
 		return nil, err
 	}
 
+	// Open fetches a small bundle whole and reads everything after from
+	// that, so the fetcher needs no cache in front of it.
 	fetch := func(ctx context.Context, start, end int64) ([]byte, error) {
 		return c.ReadRange(ctx, enc.PublicID, session.Token, start, end)
 	}
-	cached, err := bundle.CachingFetcher(ctx, fetch, session.BlobSize)
+	b, err := bundle.Open(ctx, fetch, blobKeys, session.BlobSize)
 	if err != nil {
 		return nil, describeReadError(err)
 	}
-	manifest, err := bundle.ReadManifest(ctx, cached, blobKeys, session.BlobSize)
-	if err != nil {
-		return nil, describeReadError(err)
+	opened := &Opened{Info: *info, Version: b.Version, Files: b.Files}
+
+	// A note is the bundle's single file; the envelope says it is one.
+	if info.Kind == KindText && len(b.Files) == 1 {
+		var buf bytes.Buffer
+		track := func(written int64) {
+			if progress != nil {
+				progress(written, b.Files[0].Size)
+			}
+		}
+		if err := b.DecryptFile(ctx, 0, &buf, track); err != nil {
+			return nil, describeReadError(err)
+		}
+		if err := sink.Text(buf.Bytes()); err != nil {
+			return nil, err
+		}
+		return opened, nil
 	}
-	if ms, ok := sink.(ManifestSink); ok {
-		if err := ms.Manifest(manifest); err != nil {
+
+	var chosen []int
+	if cs, ok := sink.(ChoosingSink); ok {
+		if chosen, err = cs.Choose(ctx, b.Files); err != nil {
 			return nil, err
 		}
 	}
-
-	total := manifest.TotalSize()
-	var done int64
-	for _, file := range manifest.Files {
-		fileDone := done
-		track := func(written int64) {
-			if progress != nil {
-				progress(fileDone+written, total)
+	total := b.TotalSize()
+	if chosen != nil {
+		total = 0
+		for _, i := range chosen {
+			if i >= 0 && i < len(b.Files) {
+				total += b.Files[i].Size
 			}
 		}
-		if info.Kind == KindText && len(manifest.Files) == 1 {
-			var buf bytes.Buffer
-			if err := bundle.DecryptFile(ctx, cached, blobKeys, file, &buf, track); err != nil {
-				return nil, describeReadError(err)
-			}
-			if err := sink.Text(buf.Bytes()); err != nil {
-				return nil, err
-			}
-		} else {
-			w, err := sink.File(file)
-			if err != nil {
-				return nil, err
-			}
-			if err := bundle.DecryptFile(ctx, cached, blobKeys, file, w, track); err != nil {
-				_ = w.Close()
-				return nil, describeReadError(err)
-			}
-			if err := w.Close(); err != nil {
-				return nil, err
-			}
-		}
-		done += file.Size
 	}
-	return &Opened{Info: *info, Manifest: manifest}, nil
+	track := func(written int64) {
+		if progress != nil {
+			progress(written, total)
+		}
+	}
+	if err := b.Decrypt(ctx, chosen, sink.File, track); err != nil {
+		return nil, describeReadError(err)
+	}
+	return opened, nil
 }
 
 // Delete removes the secret for everyone. It needs the owner link.

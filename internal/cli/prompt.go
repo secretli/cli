@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -85,7 +84,7 @@ func (t *terminal) close() {
 // askLine prints the prompt and reads one line.
 func (t *terminal) askLine(ctx context.Context, prompt string) (string, error) {
 	_, _ = fmt.Fprint(t.out, prompt)
-	line, err := interruptible(ctx, func() (string, error) { return bufio.NewReader(t.in).ReadString('\n') })
+	line, err := interruptible(ctx, func() (string, error) { return readLine(t.in) })
 	if ctx.Err() != nil {
 		// Ctrl-C leaves the cursor after the prompt; what follows goes below it.
 		_, _ = fmt.Fprintln(t.out)
@@ -95,6 +94,25 @@ func (t *terminal) askLine(ctx context.Context, prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// readLine reads up to and including a line break, a byte at a time, so
+// that whatever follows is left for the next question.
+func readLine(r io.Reader) (string, error) {
+	var line []byte
+	b := make([]byte, 1)
+	for {
+		n, err := r.Read(b)
+		if n == 1 {
+			line = append(line, b[0])
+			if b[0] == '\n' {
+				return string(line), nil
+			}
+		}
+		if err != nil {
+			return string(line), err
+		}
+	}
 }
 
 // askSecret prints the prompt and reads a line without echoing it.

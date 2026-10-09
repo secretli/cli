@@ -73,7 +73,7 @@ func stubbed(t *testing.T, status int, body string) (owner, recipient string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta, err := base.EncryptMeta(keys.Meta{Type: "text", BundleName: "secret.txt"})
+	meta, err := base.EncryptMeta(keys.Meta{Type: "text"})
 	if err != nil {
 		t.Fatal(err)
 	}

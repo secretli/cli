@@ -43,6 +43,13 @@ func newOpenCmd(e *env) *cobra.Command {
 saved to the current directory, or to --out, and never overwrite anything
 unless --force is given.
 
+Of a secret with several files, at a terminal, the files are listed and you
+are asked which to save: Enter saves them all, and numbers, ranges and
+names or patterns pick some, as in 2, 1 3, 1-2 or *.jpg. --stdout asks for
+the one to write. With --yes or --json, or where there is no terminal to
+ask on, nothing is asked: every file is saved, and --stdout needs a secret
+of a single file.
+
 --copy puts text on the clipboard instead, without its final line break,
 so it never shows in the terminal or its scrollback. The clipboard is
 cleared 45 seconds later, unless something else was copied by then.
@@ -159,7 +166,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		return err
 	}
 
-	sink := &fileSink{e: e, dir: o.out, toStdout: o.toStdout, force: o.force}
+	sink := &fileSink{e: e, dir: o.out, toStdout: o.toStdout, force: o.force, ask: !o.yes && !e.json, oneTime: !info.Reusable}
 	bar := e.progress("Downloading and decrypting…")
 	for attempt := 1; ; attempt++ {
 		opened, err := share.Open(ctx, c, link, password, sink, bar.update)
@@ -245,6 +252,10 @@ type fileSink struct {
 	dir      string
 	toStdout bool
 	force    bool
+	// ask allows asking which of several files to save, at a terminal.
+	ask bool
+	// oneTime is a secret whose files are gone once it is opened.
+	oneTime bool
 
 	text  []byte
 	saved []savedFile
@@ -256,25 +267,85 @@ type savedFile struct {
 	Path string `json:"path,omitempty"`
 }
 
-func (s *fileSink) Manifest(m *bundle.Manifest) error {
-	if s.toStdout {
-		if len(m.Files) != 1 {
-			return fmt.Errorf("--stdout is for a single file, and this secret has %d", len(m.Files))
+// Choose picks the files to save: every one, or, at a terminal and when
+// there are several, the ones named in the answer. Before anything is
+// written it checks that none of the chosen files would overwrite one.
+func (s *fileSink) Choose(ctx context.Context, files []bundle.Entry) ([]int, error) {
+	var t *terminal
+	if s.ask && len(files) > 1 {
+		if tt, err := s.e.terminal(); err == nil {
+			t = tt
+			defer t.close()
 		}
-		return nil
 	}
-	if len(m.Files) == 1 && m.Files[0].Name == "secret.txt" && m.BundleName == "secret.txt" {
-		return nil // text, which goes to stdout
+	if s.toStdout {
+		switch {
+		case len(files) == 1:
+			return nil, nil
+		case t == nil:
+			return nil, fmt.Errorf("--stdout is for a single file, and this secret has %d", len(files))
+		}
+		return s.pick(ctx, t, files, "Which one? ", func(chosen []int) error {
+			if len(chosen) != 1 {
+				return errors.New("--stdout writes a single file; pick one")
+			}
+			return nil
+		})
 	}
+	if t == nil {
+		return nil, s.prepare(files, nil)
+	}
+	return s.pick(ctx, t, files, "Save which? [Enter = all, or e.g. 2 · 1 3 · 1-2 · *.jpg] ", func(chosen []int) error {
+		return s.prepare(files, chosen)
+	})
+}
+
+// pick lists the files on the terminal and asks until the answer names
+// files that check accepts.
+func (s *fileSink) pick(ctx context.Context, t *terminal, files []bundle.Entry, question string, check func(chosen []int) error) ([]int, error) {
+	listFiles(t.out, files)
+	if s.oneTime {
+		_, _ = fmt.Fprintln(t.out, "Files you don't save now are gone with this one-time secret.")
+	}
+	names := make([]string, len(files))
+	for i, f := range files {
+		names[i] = f.Name
+	}
+	for {
+		answer, err := t.askLine(ctx, question)
+		if err != nil {
+			return nil, err
+		}
+		chosen, err := pickFiles(answer, names)
+		if err == nil {
+			err = check(chosen)
+		}
+		if err == nil {
+			return chosen, nil
+		}
+		_, _ = fmt.Fprintln(t.out, err)
+	}
+}
+
+// prepare makes the output directory and checks that none of the chosen
+// files, nil meaning all, exists there.
+func (s *fileSink) prepare(files []bundle.Entry, chosen []int) error {
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", s.dir, err)
 	}
-	if !s.force {
-		for _, f := range m.Files {
-			path := filepath.Join(s.dir, safeName(f.Name))
-			if _, err := os.Stat(path); err == nil {
-				return fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
-			}
+	if s.force {
+		return nil
+	}
+	if chosen == nil {
+		chosen = make([]int, len(files))
+		for i := range chosen {
+			chosen[i] = i
+		}
+	}
+	for _, i := range chosen {
+		path := filepath.Join(s.dir, safeName(files[i].Name))
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
 		}
 	}
 	return nil
@@ -285,7 +356,7 @@ func (s *fileSink) Text(text []byte) error {
 	return nil
 }
 
-func (s *fileSink) File(f bundle.File) (io.WriteCloser, error) {
+func (s *fileSink) File(f bundle.Entry) (io.WriteCloser, error) {
 	if s.toStdout {
 		s.saved = append(s.saved, savedFile{Name: f.Name, Size: f.Size})
 		return nopWriteCloser{s.e.stdout}, nil
@@ -350,7 +421,7 @@ func (e *env) printOpened(opened *share.Opened, sink *fileSink, copyText bool) e
 	}
 	names := make([]string, 0, len(sink.saved))
 	for _, f := range sink.saved {
-		names = append(names, fmt.Sprintf("%s (%s)", f.Name, formatSize(f.Size)))
+		names = append(names, fmt.Sprintf("%s (%s)", printable(f.Name), formatSize(f.Size)))
 	}
 	e.say("Saved %s to %s.\n", strings.Join(names, ", "), sink.dir)
 	return nil

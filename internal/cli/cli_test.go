@@ -151,6 +151,9 @@ func TestJSONAndFilesAndPasswords(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != 0 || status["state"] != "live" || status["opened"] != false {
 		t.Errorf("status before opening: exit %d, %v, %q", code, err, stdout)
 	}
+	if _, ok := status["name"]; ok {
+		t.Errorf("status tells a name: %q", stdout)
+	}
 
 	// No password where one is needed, and a wrong one: exit 3 both times.
 	_, stderr, code = runCLI(t, "", "open", shared.Link)
@@ -268,8 +271,9 @@ func TestUsageAndInputRules(t *testing.T) {
 	if code != 0 || strings.Count(strings.TrimSpace(stdout), "\n") != 0 || stderr != "" {
 		t.Fatalf("named stdin: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
+	// The envelope holds no name, so status tells none.
 	stdout, _, code = runCLI(t, "", "status", strings.TrimSpace(stdout))
-	if code != 0 || !strings.Contains(stdout, "set of files (dump.bin)") {
+	if code != 0 || !strings.HasPrefix(stdout, "A one-time set of files.\n") || strings.Contains(stdout, "dump.bin") {
 		t.Errorf("status: exit %d, stdout %q", code, stdout)
 	}
 
