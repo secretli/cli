@@ -27,8 +27,6 @@ import (
 const (
 	// MaxEncryptedUploadBytes is the server's default upload limit.
 	MaxEncryptedUploadBytes = 1024 * 1024 * 1024
-	// MinPartBytes is S3's minimum for every part but the last.
-	MinPartBytes = 5 * 1024 * 1024
 	// UploadConcurrency is how many parts are in flight at once.
 	UploadConcurrency = 3
 
@@ -57,6 +55,8 @@ var (
 	ErrLinkMismatch = errors.New("this link doesn't fit the secret it points to")
 	// ErrTooLarge is a share beyond the upload limit.
 	ErrTooLarge = errors.New("too large to share: the limit is 1 GiB")
+	// ErrTooManyFiles is a share whose file list passes the format's 4 MiB.
+	ErrTooManyFiles = errors.New("too many files to share at once; pack them into an archive first")
 	// ErrNothingToShare is a share with neither text nor files.
 	ErrNothingToShare = errors.New("nothing to share")
 )
@@ -146,14 +146,21 @@ func Share(ctx context.Context, c *api.Client, p Params) (*Result, error) {
 		sources = []bundle.Source{{Name: textFileName, Type: "text/plain", Size: int64(len(p.Text)), Reader: bytes.NewReader(p.Text)}}
 	}
 	names := make([]string, 0, len(sources))
-	sizes := make([]int64, 0, len(sources))
 	var total int64
 	for _, s := range sources {
 		names = append(names, s.Name)
-		sizes = append(sizes, s.Size)
 		total += s.Size
 	}
-	if bundle.EstimateEncryptedSize(sizes) > MaxEncryptedUploadBytes {
+	// The plan needs only names, types and sizes, so the bundle's exact
+	// size, padding included, is known before anything is read.
+	plan, err := bundle.NewStreamPlan(sources)
+	if errors.Is(err, bundle.ErrListTooLarge) {
+		return nil, ErrTooManyFiles
+	}
+	if err != nil {
+		return nil, err
+	}
+	if plan.TotalSize > MaxEncryptedUploadBytes {
 		return nil, ErrTooLarge
 	}
 
@@ -162,12 +169,6 @@ func Share(ctx context.Context, c *api.Client, p Params) (*Result, error) {
 		return nil, err
 	}
 	blobKeys, err := base.WithPassword(p.Password)
-	if err != nil {
-		return nil, err
-	}
-	// Bundles are written in version 2 until the web app that people have
-	// reads version 3; Open reads both.
-	plan, err := bundle.NewPlan(sources, bundle.DefaultBundleName(names))
 	if err != nil {
 		return nil, err
 	}
@@ -215,10 +216,15 @@ func Share(ctx context.Context, c *api.Client, p Params) (*Result, error) {
 	}, nil
 }
 
-// upload encrypts the plan's records in order, groups them into parts of
-// the server's size, and sends the parts a few at a time. Only a handful of
-// parts are ever in memory.
-func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan *bundle.Plan, sources []bundle.Source, blobKeys *keys.KeySet, progress func(uploaded, total int64)) (time.Time, error) {
+// upload encrypts the bundle as one stream and sends it in parts of exactly
+// the server's part size, the last one shorter, a few at a time. Parts are
+// cut wherever chunks begin and end, so their sizes say nothing about the
+// files (FORMAT.md section 9). Only a handful of parts are ever in memory.
+func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan *bundle.StreamPlan, sources []bundle.Source, blobKeys *keys.KeySet, progress func(uploaded, total int64)) (time.Time, error) {
+	stream, err := bundle.NewEncrypter(plan, sources, blobKeys)
+	if err != nil {
+		return time.Time{}, err
+	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(UploadConcurrency)
 	var (
@@ -238,73 +244,31 @@ func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan
 	}
 	report(0)
 
-	partNumber := 1
-	var partOffset int64
-	part := make([]byte, 0, min(session.PartSize, plan.TotalSize)+bundle.RecordOverhead)
-	flush := func() {
-		data := part
-		number, offset := partNumber, partOffset
-		sum := bundle.SHA256Hex(data)
+	var offset int64
+	for number := 1; offset < plan.TotalSize; number++ {
+		if err := gctx.Err(); err != nil {
+			// A part has failed for good, or the caller gave up: stop
+			// encrypting and surface that failure.
+			if werr := g.Wait(); werr != nil {
+				return time.Time{}, werr
+			}
+			return time.Time{}, err
+		}
+		data := make([]byte, min(session.PartSize, plan.TotalSize-offset))
+		if _, err := io.ReadFull(stream, data); err != nil {
+			_ = g.Wait()
+			return time.Time{}, describeSourceError(err)
+		}
+		partOffset, sum := offset, bundle.SHA256Hex(data)
 		g.Go(func() error {
-			if err := c.UploadPart(gctx, session.ID, session.Token, number, offset, data, sum); err != nil {
+			if err := c.UploadPart(gctx, session.ID, session.Token, number, partOffset, data, sum); err != nil {
 				return describeUploadError(err)
 			}
 			report(int64(len(data)))
 			return nil
 		})
-		partNumber++
-		partOffset = offset + int64(len(data))
-		part = make([]byte, 0, min(session.PartSize, plan.TotalSize-partOffset)+bundle.RecordOverhead)
+		offset += int64(len(data))
 	}
-
-	plaintext := make([]byte, bundle.ChunkSize)
-	for _, record := range plan.Records {
-		if err := gctx.Err(); err != nil {
-			// A part has failed for good, or the caller gave up: stop
-			// encrypting and surface that failure.
-			break
-		}
-		if len(part) > 0 && int64(len(part))+record.Length > session.PartSize && int64(len(part)) >= MinPartBytes {
-			flush()
-		}
-		buf := plaintext[:record.PlaintextSize]
-		if _, err := sources[record.FileIndex].Reader.ReadAt(buf, record.Start); err != nil && (!errors.Is(err, io.EOF) || int64(len(buf)) != record.PlaintextSize) {
-			return time.Time{}, fmt.Errorf("read %s: %w", sources[record.FileIndex].Name, err)
-		}
-		encrypted, err := blobKeys.EncryptRecord(buf, bundle.ChunkAAD(record.FileIndex, record.ChunkIndex, record.PlaintextSize))
-		if err != nil {
-			return time.Time{}, err
-		}
-		if int64(len(encrypted)) != record.Length {
-			return time.Time{}, errors.New("bundle record size mismatch")
-		}
-		part = append(part, encrypted...)
-	}
-	if err := gctx.Err(); err != nil {
-		if werr := g.Wait(); werr != nil {
-			return time.Time{}, werr
-		}
-		return time.Time{}, err
-	}
-
-	encryptedManifest, err := blobKeys.EncryptRecord(plan.ManifestJSON, bundle.ManifestAAD())
-	if err != nil {
-		return time.Time{}, err
-	}
-	if int64(len(encryptedManifest)) != plan.EncryptedManifestLength {
-		return time.Time{}, errors.New("bundle manifest size mismatch")
-	}
-	var footer bundle.Footer
-	footer.ManifestLength = int64(len(encryptedManifest))
-	copy(footer.ManifestSHA256[:], mustDecodeHex(bundle.SHA256Hex(encryptedManifest)))
-	trailer, err := bundle.EncodeFooter(footer)
-	if err != nil {
-		return time.Time{}, err
-	}
-	part = append(part, encryptedManifest...)
-	part = append(part, trailer...)
-	flush()
-
 	if err := g.Wait(); err != nil {
 		return time.Time{}, err
 	}
@@ -519,6 +483,14 @@ func describeReadError(err error) error {
 	return err
 }
 
+// describeSourceError says what went wrong reading the files being shared.
+func describeSourceError(err error) error {
+	if errors.Is(err, bundle.ErrSourceChanged) {
+		return fmt.Errorf("%w; share it again once it stays the same", err)
+	}
+	return err
+}
+
 func describeUploadError(err error) error {
 	var apiErr *api.Error
 	if errors.As(err, &apiErr) {
@@ -530,22 +502,4 @@ func describeUploadError(err error) error {
 		}
 	}
 	return err
-}
-
-func mustDecodeHex(h string) []byte {
-	out := make([]byte, len(h)/2)
-	for i := range out {
-		var b byte
-		for _, c := range h[i*2 : i*2+2] {
-			b <<= 4
-			switch {
-			case c >= '0' && c <= '9':
-				b |= byte(c - '0')
-			case c >= 'a' && c <= 'f':
-				b |= byte(c-'a') + 10
-			}
-		}
-		out[i] = b
-	}
-	return out
 }
