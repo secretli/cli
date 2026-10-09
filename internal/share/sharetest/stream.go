@@ -10,7 +10,7 @@ import (
 	"github.com/secretli/format/link"
 )
 
-// ShareStream makes a secret in bundle version 3 through the upload API of
+// ShareStream makes a secret through the upload API of
 // the server at origin, and returns its owner link. kind is the envelope's
 // type, "text" or "bundle".
 func ShareStream(t testing.TB, origin, kind string, reusable bool, sources ...bundle.Source) link.Link {
@@ -24,29 +24,6 @@ func ShareStream(t testing.TB, origin, kind string, reusable bool, sources ...bu
 		t.Fatal(err)
 	}
 	blob, err := bundle.EncryptStream(plan, sources, base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return shareBlob(t, origin, kind, reusable, base, blob)
-}
-
-// ShareVersion2 makes a secret in bundle version 2, which the client reads
-// but no longer writes, like ShareStream.
-func ShareVersion2(t testing.TB, origin, kind string, reusable bool, sources ...bundle.Source) link.Link {
-	t.Helper()
-	base, err := keys.Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := make([]string, 0, len(sources))
-	for _, s := range sources {
-		names = append(names, s.Name)
-	}
-	plan, err := bundle.NewPlan(sources, bundle.DefaultBundleName(names))
-	if err != nil {
-		t.Fatal(err)
-	}
-	blob, err := bundle.Encrypt(plan, sources, base)
 	if err != nil {
 		t.Fatal(err)
 	}

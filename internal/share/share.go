@@ -336,8 +336,6 @@ type ChoosingSink interface {
 // Opened is what Open found.
 type Opened struct {
 	Info Info
-	// Version is the bundle's: 3, or 2 for one written before the stream.
-	Version int
 	// Files lists every file of the bundle, chosen or not.
 	Files []bundle.Entry
 }
@@ -385,7 +383,7 @@ func Open(ctx context.Context, c *api.Client, link Link, password string, sink S
 	if err != nil {
 		return nil, describeReadError(err)
 	}
-	opened := &Opened{Info: *info, Version: b.Version, Files: b.Files}
+	opened := &Opened{Info: *info, Files: b.Files}
 
 	// A note is the bundle's single file; the envelope says it is one.
 	if info.Kind == KindText && len(b.Files) == 1 {
