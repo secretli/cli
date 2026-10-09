@@ -256,28 +256,27 @@ type savedFile struct {
 	Path string `json:"path,omitempty"`
 }
 
-func (s *fileSink) Manifest(m *bundle.Manifest) error {
+// Choose checks, before anything is written, that the files can be saved
+// without overwriting any.
+func (s *fileSink) Choose(_ context.Context, files []bundle.Entry) ([]int, error) {
 	if s.toStdout {
-		if len(m.Files) != 1 {
-			return fmt.Errorf("--stdout is for a single file, and this secret has %d", len(m.Files))
+		if len(files) != 1 {
+			return nil, fmt.Errorf("--stdout is for a single file, and this secret has %d", len(files))
 		}
-		return nil
-	}
-	if len(m.Files) == 1 && m.Files[0].Name == "secret.txt" && m.BundleName == "secret.txt" {
-		return nil // text, which goes to stdout
+		return nil, nil
 	}
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
-		return fmt.Errorf("create %s: %w", s.dir, err)
+		return nil, fmt.Errorf("create %s: %w", s.dir, err)
 	}
 	if !s.force {
-		for _, f := range m.Files {
+		for _, f := range files {
 			path := filepath.Join(s.dir, safeName(f.Name))
 			if _, err := os.Stat(path); err == nil {
-				return fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
+				return nil, fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func (s *fileSink) Text(text []byte) error {
@@ -285,7 +284,7 @@ func (s *fileSink) Text(text []byte) error {
 	return nil
 }
 
-func (s *fileSink) File(f bundle.File) (io.WriteCloser, error) {
+func (s *fileSink) File(f bundle.Entry) (io.WriteCloser, error) {
 	if s.toStdout {
 		s.saved = append(s.saved, savedFile{Name: f.Name, Size: f.Size})
 		return nopWriteCloser{s.e.stdout}, nil

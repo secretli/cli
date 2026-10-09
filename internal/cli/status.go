@@ -83,7 +83,6 @@ func (e *env) status(ctx context.Context, args []string) error {
 		out := map[string]any{
 			"state":          "live",
 			"kind":           info.Kind,
-			"name":           info.BundleName,
 			"password":       info.PasswordProtected,
 			"reusable":       info.Reusable,
 			"encrypted_size": info.EncryptedSize,
@@ -101,7 +100,7 @@ func (e *env) status(ctx context.Context, args []string) error {
 	if info.Kind == share.KindText {
 		what += "text secret"
 	} else {
-		what += "set of files (" + info.BundleName + ")"
+		what += "set of files"
 	}
 	if info.PasswordProtected {
 		what += " with a password"

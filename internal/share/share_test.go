@@ -22,7 +22,7 @@ type memorySink struct {
 
 func (m *memorySink) Text(text []byte) error { m.text = text; return nil }
 
-func (m *memorySink) File(file bundle.File) (io.WriteCloser, error) {
+func (m *memorySink) File(file bundle.Entry) (io.WriteCloser, error) {
 	if m.files == nil {
 		m.files = map[string]*bytes.Buffer{}
 	}
@@ -66,7 +66,7 @@ func TestShareAndOpenText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Kind != share.KindText || info.PasswordProtected || info.Reusable || info.BundleName != "secret.txt" {
+	if info.Kind != share.KindText || info.PasswordProtected || info.Reusable {
 		t.Errorf("info = %+v", info)
 	}
 
@@ -75,8 +75,8 @@ func TestShareAndOpenText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sink.text) != "the launch code is 0000" || opened.Info.Kind != share.KindText {
-		t.Errorf("text = %q", sink.text)
+	if string(sink.text) != "the launch code is 0000" || opened.Info.Kind != share.KindText || opened.Version != 2 {
+		t.Errorf("text = %q, opened = %+v", sink.text, opened)
 	}
 
 	// A one-time secret is gone once opened, and its link says so.
@@ -127,7 +127,7 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !info.PasswordProtected || !info.Reusable || info.Kind != share.KindFiles || info.BundleName != "Secretli bundle (2 files)" {
+	if !info.PasswordProtected || !info.Reusable || info.Kind != share.KindFiles {
 		t.Errorf("info = %+v", info)
 	}
 	if _, err := share.Open(ctx, c, recipient, "", &memorySink{}, nil); !errors.Is(err, share.ErrPasswordRequired) {
@@ -139,8 +139,13 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 
 	sink := &memorySink{}
 	var last int64
-	if _, err := share.Open(ctx, c, recipient, "hunter2", sink, func(done, _ int64) { last = done }); err != nil {
+	opened, err := share.Open(ctx, c, recipient, "hunter2", sink, func(done, _ int64) { last = done })
+	if err != nil {
 		t.Fatal(err)
+	}
+	// Uploads stay version 2 until the web app reads version 3.
+	if opened.Version != 2 {
+		t.Errorf("bundle version %d, want 2", opened.Version)
 	}
 	if !bytes.Equal(sink.files["big.bin"].Bytes(), big) || sink.files["notes.txt"].String() != "notes" {
 		t.Error("decrypted files differ from the originals")
@@ -159,6 +164,63 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	}
 	if !info.Opened {
 		t.Error("a recipient opened it, so Opened must be set")
+	}
+}
+
+// choosingSink keeps only the files it chooses, and what it was offered.
+type choosingSink struct {
+	memorySink
+	choose  []int
+	offered []bundle.Entry
+}
+
+func (c *choosingSink) Choose(_ context.Context, files []bundle.Entry) ([]int, error) {
+	c.offered = files
+	return c.choose, nil
+}
+
+func TestOpenReadsBundleVersion3AndOnlyTheChosenFiles(t *testing.T) {
+	ctx := context.Background()
+	c, srv := newClient(t, 32*1024*1024)
+	// Above 1 MiB, so that the files are read by range and not from the
+	// bundle fetched whole.
+	big := bytes.Repeat([]byte("0123456789abcdef"), 96*1024)
+	files := []bundle.Source{
+		{Name: "big.bin", Size: int64(len(big)), Reader: bytes.NewReader(big)},
+		{Name: "skipped.bin", Size: 600 * 1024, Reader: bytes.NewReader(make([]byte, 600*1024))},
+		{Name: "notes.txt", Type: "text/plain", Size: 5, Reader: strings.NewReader("notes")},
+	}
+	l := sharetest.ShareStream(t, srv.URL, "bundle", false, files...)
+
+	info, err := share.Inspect(ctx, c, l)
+	if err != nil || info.Kind != share.KindFiles {
+		t.Fatalf("info = %+v, %v", info, err)
+	}
+	sink := &choosingSink{choose: []int{0, 2}}
+	var last, total int64
+	opened, err := share.Open(ctx, c, l.Recipient(), "", sink, func(done, all int64) { last, total = done, all })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Version != 3 || len(opened.Files) != 3 || len(sink.offered) != 3 || sink.offered[1].Name != "skipped.bin" {
+		t.Errorf("opened = %+v, offered %+v", opened, sink.offered)
+	}
+	if len(sink.files) != 2 || !bytes.Equal(sink.files["big.bin"].Bytes(), big) || sink.files["notes.txt"].String() != "notes" {
+		t.Errorf("saved %d files, or they differ from the originals", len(sink.files))
+	}
+	if want := int64(len(big)) + 5; last != want || total != want {
+		t.Errorf("progress ended at %d of %d, want %d of %d", last, total, want, want)
+	}
+
+	// A note in version 3 is text, and nothing is offered to choose from.
+	note := []bundle.Source{{Name: "secret.txt", Type: "text/plain", Size: 4, Reader: strings.NewReader("hush")}}
+	l = sharetest.ShareStream(t, srv.URL, "text", true, note...)
+	sink = &choosingSink{}
+	if opened, err = share.Open(ctx, c, l.Recipient(), "", sink, nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(sink.text) != "hush" || sink.offered != nil || opened.Version != 3 || opened.Info.Kind != share.KindText {
+		t.Errorf("text = %q, offered %+v, opened %+v", sink.text, sink.offered, opened)
 	}
 }
 
