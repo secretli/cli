@@ -28,7 +28,7 @@ brew install secretli/tap/secretli
 Without Homebrew, binaries for macOS, Linux and Windows are on the [releases page](https://github.com/secretli/cli/releases). Pick the archive for your system, check it, and put the binary on your PATH:
 
 ```bash
-VERSION=v0.9.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
+VERSION=v0.10.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
 BASE="https://github.com/secretli/cli/releases/download/${VERSION}"
 curl -fsSLO "${BASE}/secretli_${VERSION}_${OS}_${ARCH}.tar.gz"
 gh attestation verify "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" --repo secretli/cli
