@@ -109,6 +109,23 @@ func (s *Server) PartsUploaded() int {
 	return n
 }
 
+// PartSizes is the size of each part of the most recent upload session, in
+// part order.
+func (s *Server) PartSizes() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sizes []int64
+	for _, up := range s.uploads {
+		sizes = make([]int64, len(up.parts))
+		for n, data := range up.parts {
+			if n >= 1 && n <= len(sizes) {
+				sizes[n-1] = int64(len(data))
+			}
+		}
+	}
+	return sizes
+}
+
 // Secrets is how many live secrets the server holds.
 func (s *Server) Secrets() int {
 	s.mu.Lock()
