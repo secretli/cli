@@ -63,7 +63,7 @@ pg_dump db | gzip | secretli share --name db.sql.gz
 
 Links open once and expire after a day unless you say otherwise: `-e` takes `5m`, `10m`, `15m`, `1h`, `4h`, `12h`, `1d`, `3d` or `7d`, and `--reusable` lets a link open again and again until it expires. `-p` asks for a password; `--password-file` and `SECRETLI_PASSWORD` provide one without asking. `--qr` also draws the link as a QR code, for a phone to scan off the screen, and `-c` copies it to the clipboard.
 
-Every share prints two links: the one to hand out, and the owner link, which can delete the secret and tells you whether it was opened. Keep the owner link to yourself.
+Every share prints two links: the one to hand out, and the owner link, which can delete the secret and, for a reusable one, tells you whether it has been opened. Keep the owner link to yourself.
 
 **Opening.** Text goes to stdout exactly as it was shared. Files are saved to the current directory or to `--out`, and nothing is overwritten unless you pass `--force`; `--stdout` streams a single file instead. Before anything is opened, the command says what the link points to. Opening a one-time secret uses it up, so for one of those it asks first, and Enter means no; `-y`/`--yes` opens it without asking. Reusable secrets open right away. Without an argument the link is read from stdin, or asked for, which keeps it out of your shell history too.
 
@@ -75,7 +75,7 @@ When a secret holds several files, `open` lists them with their sizes and asks w
 
 `receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force`, `--yes`, `--copy` and password options, or prints the link with `--link` (with `--copy`, it copies the link). If you decline to open a one-time secret, it prints the link instead, since the code is used up by then. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
 
-**Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. For a secret that is gone it says what happened, opened or deleted, but not when. One that has expired is simply not found, like a link to nothing, so all `status` can say then is that it is gone. The exit code is 4 either way, and with `--json` the state is `live` or `gone`. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
+**Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. Once a secret is gone, opened, deleted or expired, the server keeps nothing about it, so all `status` can say then is that it is gone, to the owner as to a recipient, as it does for a link to nothing. The exit code is 4 then, and with `--json` the state is `live` or `gone`. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
 
 ## Scripts
 

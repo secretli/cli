@@ -75,6 +75,28 @@ func TestSendAndReceiveWithACode(t *testing.T) {
 	}
 }
 
+// A code can bring the link of a secret that is gone by now. receive says so
+// as open does, with the same exit code.
+func TestReceivingAGoneSecretSaysItIsGone(t *testing.T) {
+	srv := fakeServer(t)
+	server := "--server=" + srv.URL
+	link, _, _ := runCLI(t, "secret\n", "share", server, "-q")
+	link = strings.TrimSpace(link)
+	if _, stderr, code := runCLI(t, "", "open", link, "--yes"); code != 0 {
+		t.Fatalf("open: exit %d, stderr %q", code, stderr)
+	}
+
+	sender := startCLI(t, "", "send", link)
+	transferCode := firstLine(t, sender)
+	stdout, stderr, code := runCLI(t, "", "receive", transferCode, server, "--yes")
+	if code != ExitGone || stdout != "" || stderr != "secretli: this secret is gone: it may have expired, been opened or been deleted\n" {
+		t.Errorf("receive: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code := exitOf(t, sender); code != 0 {
+		t.Errorf("send: exit %d, stderr %q", code, sender.stderr())
+	}
+}
+
 func TestAWrongCodeFailsOnBothSides(t *testing.T) {
 	srv := fakeServer(t)
 	server := "--server=" + srv.URL

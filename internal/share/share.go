@@ -61,18 +61,10 @@ var (
 	ErrNothingToShare = errors.New("nothing to share")
 )
 
-// GoneError is a secret that is no longer there, with what became of it.
-type GoneError struct {
-	Gone api.Gone
-}
-
-func (e *GoneError) Error() string {
-	return "this secret is gone: " + e.Gone.Outcome
-}
-
-// NotFoundError is a secret the server has no record of: a link to nothing,
-// or to a secret that expired, since the server tells what became of a secret
-// only until it would have expired.
+// NotFoundError is a secret the server has no record of. Once a secret is
+// gone, opened, deleted or expired, the server keeps nothing about it, so it
+// answers the same as for a link to nothing, to the owner and a recipient
+// alike.
 type NotFoundError struct{}
 
 func (*NotFoundError) Error() string {
@@ -293,7 +285,7 @@ type Info struct {
 	Opened bool
 }
 
-// Inspect describes a live secret, or returns a *GoneError or *NotFoundError.
+// Inspect describes a live secret, or returns a *NotFoundError.
 func Inspect(ctx context.Context, c *api.Client, link Link) (*Info, error) {
 	base, err := keys.FromShareSecret(link.Secret, "")
 	if err != nil {
@@ -378,10 +370,7 @@ func Open(ctx context.Context, c *api.Client, link Link, password string, sink S
 		case api.IsStatus(err, http.StatusForbidden):
 			return nil, ErrLinkMismatch
 		case api.IsStatus(err, http.StatusNotFound):
-			// It went away between the look and the opening; the server can say why.
-			if _, lookErr := Inspect(ctx, c, link); lookErr != nil {
-				return nil, lookErr
-			}
+			// It went away between the look and the opening.
 			return nil, &NotFoundError{}
 		}
 		return nil, err
@@ -461,9 +450,6 @@ func Delete(ctx context.Context, c *api.Client, link Link) error {
 }
 
 func describeLookupError(err error) error {
-	if gone, ok := api.AsGone(err); ok {
-		return &GoneError{Gone: *gone}
-	}
 	if api.IsStatus(err, http.StatusNotFound) {
 		return &NotFoundError{}
 	}

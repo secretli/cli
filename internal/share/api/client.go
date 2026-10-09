@@ -70,31 +70,6 @@ func IsStatus(err error, status int) bool {
 	return errors.As(err, &apiErr) && apiErr.Status == status
 }
 
-// Gone is what the server tells about a secret that is no longer there: the
-// details of its 410 answer, which it keeps until the secret would have
-// expired. After that the secret is simply not found.
-type Gone struct {
-	// Outcome is opened or deleted.
-	Outcome       string
-	BurnAfterRead bool
-}
-
-// AsGone extracts the story from a 410 answer; one without an outcome tells
-// none.
-func AsGone(err error) (*Gone, bool) {
-	var apiErr *Error
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusGone || apiErr.Details == nil {
-		return nil, false
-	}
-	outcome, _ := apiErr.Details["outcome"].(string)
-	if outcome == "" {
-		return nil, false
-	}
-	gone := &Gone{Outcome: outcome}
-	gone.BurnAfterRead, _ = apiErr.Details["burn_after_read"].(bool)
-	return gone, true
-}
-
 // Metadata is what the server knows about a live secret.
 type Metadata struct {
 	EncryptedMeta string
@@ -106,8 +81,9 @@ type Metadata struct {
 	Opened bool
 }
 
-// Metadata fetches a secret's metadata. A secret that is gone comes back as
-// an *Error with status 410 that AsGone can read.
+// Metadata fetches a secret's metadata. A secret that is gone, opened,
+// deleted or expired, comes back as an *Error with status 404, the same as a
+// secret that never was.
 func (c *Client) Metadata(ctx context.Context, publicID, metadataToken string) (*Metadata, error) {
 	var body struct {
 		EncryptedMeta string `json:"encrypted_meta"`

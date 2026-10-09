@@ -110,24 +110,6 @@ func (e *env) checkCopy(o openOptions) error {
 	return nil
 }
 
-// describedGone carries the owner's or the recipient's version of what became
-// of a secret, while staying a GoneError for the exit code.
-type describedGone struct {
-	inner *share.GoneError
-	owner bool
-}
-
-func (d *describedGone) Error() string { return goneSentence(d.inner.Gone, d.owner) }
-func (d *describedGone) Unwrap() error { return d.inner }
-
-func describeGone(err error, owner bool) error {
-	var gone *share.GoneError
-	if errors.As(err, &gone) {
-		return &describedGone{inner: gone, owner: owner}
-	}
-	return err
-}
-
 func (e *env) open(ctx context.Context, o openOptions, args []string) error {
 	if err := e.checkCopy(o); err != nil {
 		return err
@@ -145,7 +127,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 	now := time.Now()
 	info, err := share.Inspect(ctx, c, link)
 	if err != nil {
-		return describeGone(err, link.IsOwner())
+		return err
 	}
 	e.say("%s\n", describeInfo(info, link.IsOwner(), now))
 	if o.copy && info.Kind != share.KindText {
@@ -186,7 +168,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 				}
 			}
 		}
-		return describeGone(err, link.IsOwner())
+		return err
 	}
 }
 

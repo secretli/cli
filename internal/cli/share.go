@@ -36,8 +36,8 @@ func newShareCmd(e *env) *cobra.Command {
 		Use:   "share [files...]",
 		Short: "Encrypt text or files and get a link",
 		Long: `Encrypts text or files here and uploads only the ciphertext. Prints the link
-to hand out, and the owner link that can delete the secret and later tell
-whether it was opened.
+to hand out, and the owner link, which can delete the secret and, for a
+reusable one, tell whether it has been opened.
 
 Files are given as arguments. Text comes from stdin, from --text, or, at a
 terminal, from a prompt, which keeps it out of your shell history. "-" shares
@@ -165,7 +165,7 @@ func (e *env) shareWithCode(ctx context.Context, r *share.Result) error {
 	if e.json {
 		return e.handOver(ctx, r.Link.Recipient(), sharedJSON(r))
 	}
-	summary := fmt.Sprintf("Your secret is ready. %s\n\n%s\n\n  %s\n\n", shareSummary(r), ownerNote, r.Link.String())
+	summary := fmt.Sprintf("Your secret is ready. %s\n\n%s\n\n  %s\n\n", shareSummary(r), ownerNote(r), r.Link.String())
 	if e.stdoutTTY && !e.quiet {
 		_, _ = fmt.Fprint(e.stdout, summary)
 	} else {
@@ -242,15 +242,23 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 	if e.quiet || !e.stdoutTTY {
 		_, _ = fmt.Fprintln(e.stdout, link)
 		if !e.quiet {
-			_, _ = fmt.Fprintf(e.stderr, "%s\n%s\n%s\n", summary, ownerNote, r.Link.String())
+			_, _ = fmt.Fprintf(e.stderr, "%s\n%s\n%s\n", summary, ownerNote(r), r.Link.String())
 		}
 		return nil
 	}
-	_, _ = fmt.Fprintf(e.stdout, "Your link is ready. %s\n\n  %s\n\n%s\n\n  %s\n", summary, link, ownerNote, r.Link.String())
+	_, _ = fmt.Fprintf(e.stdout, "Your link is ready. %s\n\n  %s\n\n%s\n\n  %s\n", summary, link, ownerNote(r), r.Link.String())
 	return nil
 }
 
-const ownerNote = "Owner link, keep it to yourself: it can delete the secret and shows whether it was opened."
+// ownerNote says what the owner link is for. It shows whether a reusable
+// secret has been opened; a one-time secret is gone once opened, and the
+// server keeps nothing about it that could tell.
+func ownerNote(r *share.Result) string {
+	if r.Reusable {
+		return "Owner link, keep it to yourself: it can delete the secret and shows whether it has been opened."
+	}
+	return "Owner link, keep it to yourself: it can delete the secret."
+}
 
 // shareSummary says how often a new secret opens and when it expires.
 func shareSummary(r *share.Result) string {
