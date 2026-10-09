@@ -61,6 +61,7 @@ jobs:
   # Nothing is released unless it passes.
   whole-setup:
     uses: secretli/e2e/.github/workflows/whole-setup.yml@main
+    secrets: inherit
     with:
       cli_ref: ${{ github.sha }}
 
