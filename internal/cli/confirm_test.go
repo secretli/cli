@@ -28,6 +28,29 @@ func answering(t *testing.T, answer string) *bytes.Buffer {
 	return asked
 }
 
+// answeringInTurn stands in a terminal that answers successive questions
+// with successive lines, and returns what was asked on it. Every terminal
+// it opens reads from the same file, so each question takes the line after
+// the one the last question took.
+func answeringInTurn(t *testing.T, answers ...string) *bytes.Buffer {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "tty")
+	if err := os.WriteFile(path, []byte(strings.Join(answers, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, err := os.Open(path) //nolint:gosec // the test's own file
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = in.Close() })
+	asked := &bytes.Buffer{}
+	openTTY = func() (*terminal, error) {
+		return &terminal{in: in, out: asked, fd: int(in.Fd())}, nil
+	}
+	t.Cleanup(func() { openTTY = func() (*terminal, error) { return nil, errNoTerminal } })
+	return asked
+}
+
 // shareText shares text and returns the link and the owner link.
 func shareText(t *testing.T, server, text string, extra ...string) (string, string) {
 	t.Helper()
