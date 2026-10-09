@@ -49,6 +49,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Docker Hub limits anonymous pulls from shared runners, so pulls are
+      # made as the organisation's read-only Docker Hub user.
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       # The server repository knows what the server needs to run.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,6 +102,7 @@ jobs:
   # problem shows up here rather than when a release is tagged.
   whole-setup:
     uses: secretli/e2e/.github/workflows/whole-setup.yml@main
+    secrets: inherit
     with:
       cli_ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
