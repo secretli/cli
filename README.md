@@ -28,7 +28,7 @@ brew install secretli/tap/secretli
 Without Homebrew, binaries for macOS, Linux and Windows are on the [releases page](https://github.com/secretli/cli/releases). Pick the archive for your system, check it, and put the binary on your PATH:
 
 ```bash
-VERSION=v0.12.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
+VERSION=v0.13.0; OS=darwin; ARCH=arm64   # OS: darwin or linux; ARCH: arm64 or amd64
 BASE="https://github.com/secretli/cli/releases/download/${VERSION}"
 curl -fsSLO "${BASE}/secretli_${VERSION}_${OS}_${ARCH}.tar.gz"
 gh attestation verify "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" --repo secretli/cli
@@ -125,7 +125,7 @@ SECRETLI_TEST_SERVER=http://localhost:8080 make test
 
 On macOS, where `--network host` does not reach the host, run the server on the compose network instead and publish its port.
 
-Releases are made by pushing an annotated tag such as `v0.12.0` on `main`. The release workflow builds the binaries and runs the whole of Secretli with the tag's client; only if that passes does it write `checksums.txt`, attest every file and create the GitHub release. Its last job writes the new formula to [secretli/homebrew-tap](https://github.com/secretli/homebrew-tap), except for pre-releases (tags with a dash). Afterwards, bump the version in the install commands above.
+Releases are made by pushing an annotated tag such as `v0.13.0` on `main`. The release workflow builds the binaries and runs the whole of Secretli with the tag's client; only if that passes does it write `checksums.txt`, attest every file and create the GitHub release. Its last job writes the new formula to [secretli/homebrew-tap](https://github.com/secretli/homebrew-tap), except for pre-releases (tags with a dash). Afterwards, bump the version in the install commands above.
 
 ## License
 
