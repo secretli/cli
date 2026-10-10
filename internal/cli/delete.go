@@ -41,7 +41,7 @@ func (e *env) delete(ctx context.Context, args []string, yes bool) error {
 		if err != nil {
 			return errors.New("use --yes to delete without being asked")
 		}
-		ok, err := t.confirm(ctx, "Delete it for everyone? The link stops working right away.")
+		ok, err := t.confirm(ctx, "Delete it for everyone? "+t.paint(yellow, "The link stops working right away."))
 		t.close()
 		if err != nil {
 			return err
@@ -56,6 +56,6 @@ func (e *env) delete(ctx context.Context, args []string, yes bool) error {
 	if e.json {
 		return e.emitJSON(map[string]any{"deleted": true})
 	}
-	e.say("Deleted. The link doesn't open anything any more.\n")
+	e.done("Deleted. The link doesn't open anything any more.\n")
 	return nil
 }

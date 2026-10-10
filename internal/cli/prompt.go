@@ -41,6 +41,8 @@ type terminal struct {
 	out io.Writer
 	fd  int
 	own bool
+	// colour allows colour in what is written to out.
+	colour bool
 }
 
 var errNoTerminal = errors.New("not at a terminal")
@@ -67,12 +69,18 @@ func (e *env) canAsk() bool {
 
 func (e *env) terminal() (*terminal, error) {
 	if t, err := openTTY(); err == nil {
+		t.colour = colours(term.IsTerminal(t.fd), e.json, os.LookupEnv)
 		return t, nil
 	}
 	if e.stdinTTY {
-		return &terminal{in: e.stdin, out: e.stderr, fd: int(e.stdin.Fd())}, nil
+		return &terminal{in: e.stdin, out: e.stderr, fd: int(e.stdin.Fd()), colour: e.stderrColours()}, nil
 	}
 	return nil, errNoTerminal
+}
+
+// paint colours s, if the terminal allows it.
+func (t *terminal) paint(colour, s string) string {
+	return paint(t.colour, colour, s)
 }
 
 func (t *terminal) close() {

@@ -181,11 +181,11 @@ func (e *env) confirmOpen(ctx context.Context, owner bool) error {
 		return errors.New("this secret opens only once; use --yes to open it without being asked")
 	}
 	defer t.close()
-	question := "Open it now? It opens only once; after that the link stops working."
+	warning := "It opens only once; after that the link stops working."
 	if owner {
-		question = "Open it now? It opens only once, so the person you sent it to won't be able to."
+		warning = "It opens only once, so the person you sent it to won't be able to."
 	}
-	ok, err := t.confirm(ctx, question)
+	ok, err := t.confirm(ctx, "Open it now? "+t.paint(yellow, warning))
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func (s *fileSink) pick(ctx context.Context, t *terminal, files []bundle.Entry, 
 		if !deadline.IsZero() {
 			when = "by " + formatBy(deadline, time.Now())
 		}
-		_, _ = fmt.Fprintf(t.out, "Files you don't save %s are gone with this one-time secret.\n", when)
+		_, _ = fmt.Fprintln(t.out, t.paint(yellow, "Files you don't save "+when+" are gone with this one-time secret."))
 	}
 	names := make([]string, len(files))
 	for i, f := range files {
@@ -411,6 +411,6 @@ func (e *env) printOpened(opened *share.Opened, sink *fileSink, copyText bool) e
 	for _, f := range sink.saved {
 		names = append(names, fmt.Sprintf("%s (%s)", printable(f.Name), formatSize(f.Size)))
 	}
-	e.say("Saved %s to %s.\n", strings.Join(names, ", "), sink.dir)
+	e.done("Saved %s to %s.\n", strings.Join(names, ", "), sink.dir)
 	return nil
 }

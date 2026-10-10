@@ -164,7 +164,7 @@ func (e *env) copySecret(text, what string) error {
 		e.note("Copied %s to the clipboard, but couldn't arrange for it to be cleared (%v); clear it yourself.\n", what, err)
 		return nil
 	}
-	e.say("Copied %s to the clipboard; it is cleared in %d seconds.\n", what, int(clipboardClearAfter.Seconds()))
+	e.done("Copied %s to the clipboard; it is cleared in %d seconds.\n", what, int(clipboardClearAfter.Seconds()))
 	return nil
 }
 

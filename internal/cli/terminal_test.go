@@ -4,9 +4,14 @@ package cli
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -37,13 +42,25 @@ type atTerminal struct {
 
 	mu     sync.Mutex
 	output []byte
-	seen   int           // how far expect has read
 	more   chan struct{} // signalled when output grows
+	seen   int           // how far expect has read on the screen
+}
+
+// terminalSetup changes how the command starts at the terminal: with more
+// in its environment, or with stdout or stderr going elsewhere.
+type terminalSetup struct {
+	env            []string
+	stdout, stderr *os.File
 }
 
 // startAtTerminal starts the command with these arguments in a terminal of
 // its own: the test binary, which TestMain turns into the command.
 func startAtTerminal(t *testing.T, args ...string) *atTerminal {
+	t.Helper()
+	return startAtTerminalWith(t, terminalSetup{}, args...)
+}
+
+func startAtTerminalWith(t *testing.T, setup terminalSetup, args ...string) *atTerminal {
 	t.Helper()
 	ptmx, tty, err := pty.Open()
 	if err != nil {
@@ -53,15 +70,23 @@ func startAtTerminal(t *testing.T, args ...string) *atTerminal {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(os.Args[0], args...)
-	// The race detector waits a second before a program exits; the
-	// command needn't.
-	cmd.Env = []string{runAsCommand + "=1", "GORACE=" + os.Getenv("GORACE") + " atexit_sleep_ms=0"}
+	// A terminal that takes colour, whatever the tests run in. The race
+	// detector waits a second before a program exits; the command needn't.
+	cmd.Env = []string{runAsCommand + "=1", "TERM=xterm-256color", "GORACE=" + os.Getenv("GORACE") + " atexit_sleep_ms=0"}
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "SECRETLI_") && !strings.HasPrefix(kv, "GORACE=") {
+		name, _, _ := strings.Cut(kv, "=")
+		if !strings.HasPrefix(name, "SECRETLI_") && name != "GORACE" && name != "TERM" && name != "NO_COLOR" {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
+	cmd.Env = append(cmd.Env, setup.env...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	if setup.stdout != nil {
+		cmd.Stdout = setup.stdout
+	}
+	if setup.stderr != nil {
+		cmd.Stderr = setup.stderr
+	}
 	// A session of its own, with the terminal as its controlling terminal:
 	// /dev/tty is the terminal then, and Ctrl-C reaches the command.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
@@ -105,22 +130,22 @@ func startAtTerminal(t *testing.T, args ...string) *atTerminal {
 	return c
 }
 
+// escapeCode is a control sequence: colour, or clearing a line.
+var escapeCode = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
 // expect waits until text appears after what the last expect found, and
-// returns what appeared up to its end.
+// returns what appeared up to its end. It reads the text as the person
+// does, without the escape codes that colour it.
 func (c *atTerminal) expect(text string) string {
 	c.t.Helper()
 	timeout := time.After(terminalWait)
 	for {
-		c.mu.Lock()
+		shown := c.screen()
 		from := c.seen
-		i := bytes.Index(c.output[from:], []byte(text))
-		if i >= 0 {
+		if i := strings.Index(shown[from:], text); i >= 0 {
 			c.seen = from + i + len(text)
-			got := string(c.output[from:c.seen])
-			c.mu.Unlock()
-			return got
+			return shown[from:c.seen]
 		}
-		c.mu.Unlock()
 		select {
 		case <-c.more:
 		case <-c.read:
@@ -131,8 +156,13 @@ func (c *atTerminal) expect(text string) string {
 	}
 }
 
-// screen is everything the terminal has shown.
+// screen is everything the terminal has shown, without escape codes.
 func (c *atTerminal) screen() string {
+	return escapeCode.ReplaceAllString(c.raw(), "")
+}
+
+// raw is everything the terminal has been sent, escape codes and all.
+func (c *atTerminal) raw() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return string(c.output)
@@ -326,4 +356,164 @@ func TestTerminalCtrlC(t *testing.T) {
 			t.Error("the terminal no longer shows what is typed")
 		}
 	})
+}
+
+// At a terminal, colour marks what matters: what cannot be undone in
+// yellow, what is done in green with a tick, the error prefix in red. The
+// text is the same as without it; the other terminal tests read it so.
+func TestTerminalColour(t *testing.T) {
+	srv := fakeServer(t)
+	link, _ := shareLargeFiles(t, "--server="+srv.URL)
+	out := filepath.Join(t.TempDir(), "out")
+
+	c := startAtTerminal(t, "open", link, "--out", out)
+	c.expect("[y/N] ")
+	c.typ("y\r")
+	c.expect("Save which?")
+	c.typ("1\r")
+	c.expect("Saved a.txt (13 B) to " + out + ".")
+	if code := c.exitCode(); code != 0 {
+		t.Fatalf("exit %d; the terminal shows:\n%s", code, c.screen())
+	}
+	for _, want := range []string{
+		"Open it now? \x1b[33mIt opens only once; after that the link stops working.\x1b[0m [y/N] ",
+		"\r\n\x1b[33mFiles you don't save by ",
+		" are gone with this one-time secret.\x1b[0m\r\nSave which?",
+		"\x1b[32m✓ Saved a.txt (13 B) to " + out + ".\x1b[0m\r\n",
+	} {
+		if !strings.Contains(c.raw(), want) {
+			t.Errorf("the terminal was sent %q, without %q", c.raw(), want)
+		}
+	}
+
+	c = startAtTerminal(t, "open", link)
+	c.expect("secretli: this secret is gone")
+	if code := c.exitCode(); code != ExitGone || !strings.Contains(c.raw(), "\x1b[31msecretli:\x1b[0m this secret is gone") {
+		t.Errorf("exit %d, the terminal was sent %q", code, c.raw())
+	}
+
+	_, owner := shareText(t, "--server="+srv.URL, "to be deleted\n")
+	c = startAtTerminal(t, "delete", owner)
+	c.expect("[y/N] ")
+	c.typ("y\r")
+	c.expect("Deleted.")
+	if code := c.exitCode(); code != 0 {
+		t.Fatalf("delete: exit %d; the terminal shows:\n%s", code, c.screen())
+	}
+	for _, want := range []string{
+		"Delete it for everyone? \x1b[33mThe link stops working right away.\x1b[0m [y/N] ",
+		"\x1b[32m✓ Deleted. The link doesn't open anything any more.\x1b[0m\r\n",
+	} {
+		if !strings.Contains(c.raw(), want) {
+			t.Errorf("the terminal was sent %q, without %q", c.raw(), want)
+		}
+	}
+}
+
+// NO_COLOR, set to anything, and TERM=dumb leave the terminal plain.
+func TestTerminalWithoutColour(t *testing.T) {
+	srv := fakeServer(t)
+	for _, env := range []string{"NO_COLOR=1", "NO_COLOR=", "TERM=dumb"} {
+		link, _ := shareText(t, "--server="+srv.URL, "plain\n")
+		c := startAtTerminalWith(t, terminalSetup{env: []string{env}}, "open", link)
+		c.expect("[y/N] ")
+		c.typ("y\r")
+		c.expect("plain\r\n")
+		if code := c.exitCode(); code != 0 {
+			t.Fatalf("%s: exit %d; the terminal shows:\n%s", env, code, c.screen())
+		}
+		if strings.Contains(c.raw(), "\x1b") {
+			t.Errorf("%s: the terminal was sent %q", env, c.raw())
+		}
+
+		c = startAtTerminalWith(t, terminalSetup{env: []string{env}}, "open", link)
+		c.expect("secretli: this secret is gone")
+		if code := c.exitCode(); code != ExitGone || strings.Contains(c.raw(), "\x1b") {
+			t.Errorf("%s: exit %d, the terminal was sent %q", env, code, c.raw())
+		}
+	}
+}
+
+// With stdout and stderr going to files at a terminal, as in `secretli
+// open … > out 2> err`, the question is still asked at the terminal, in
+// colour, and the files get plain text.
+func TestTerminalKeepsFilesPlain(t *testing.T) {
+	srv := fakeServer(t)
+	link, _ := shareText(t, "--server="+srv.URL, "only once\n")
+	dir := t.TempDir()
+	file := func(name string) *os.File {
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		return f
+	}
+	read := func(name string) string {
+		b, _ := os.ReadFile(filepath.Join(dir, name))
+		return string(b)
+	}
+
+	c := startAtTerminalWith(t, terminalSetup{stdout: file("stdout"), stderr: file("stderr")}, "open", link)
+	c.expect("[y/N] ")
+	c.typ("y\r")
+	if code := c.exitCode(); code != 0 {
+		t.Fatalf("exit %d; the terminal shows:\n%s", code, c.screen())
+	}
+	if !strings.Contains(c.raw(), "\x1b[33mIt opens only once") {
+		t.Errorf("the terminal was sent %q", c.raw())
+	}
+	if got := read("stdout"); got != "only once\n" {
+		t.Errorf("stdout %q", got)
+	}
+	if got := read("stderr"); !strings.HasPrefix(got, "A one-time text secret, sent just now, expires ") || strings.Count(got, "\n") != 1 || strings.Contains(got, "\x1b") {
+		t.Errorf("stderr %q", got)
+	}
+
+	c = startAtTerminalWith(t, terminalSetup{stdout: file("stdout2"), stderr: file("stderr2")}, "open", link)
+	if code := c.exitCode(); code != ExitGone {
+		t.Errorf("exit %d", code)
+	}
+	if got, want := read("stderr2"), "secretli: this secret is gone: it may have expired, been opened or been deleted\n"; got != want || read("stdout2") != "" {
+		t.Errorf("stderr %q, want %q; stdout %q", got, want, read("stdout2"))
+	}
+}
+
+// Ctrl-C during a download clears the progress line before it says so.
+func TestTerminalCtrlCDuringADownload(t *testing.T) {
+	srv := fakeServer(t)
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A server that hands out the start of a secret, then nothing more.
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	stalling := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/blob") && !strings.HasPrefix(r.Header.Get("Range"), "bytes=0-") {
+			<-r.Context().Done()
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(stalling.Close)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "big.bin"), bytes.Repeat([]byte("this is big.bin\n"), 256*1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runCLI(t, "", "share", "--server="+stalling.URL, "--reusable", filepath.Join(dir, "big.bin"))
+	if code != 0 {
+		t.Fatalf("share: exit %d, %q", code, stderr)
+	}
+
+	c := startAtTerminal(t, "open", strings.TrimSpace(stdout), "--out", filepath.Join(dir, "out"))
+	c.expect("Downloading and decrypting… ")
+	c.typ("\x03")
+	c.expect("secretli: interrupted")
+	if code := c.exitCode(); code != ExitError {
+		t.Errorf("exit %d", code)
+	}
+	raw := c.raw()
+	if !strings.Contains(raw, "\r\x1b[K\x1b[31msecretli:\x1b[0m interrupted\r\n") {
+		t.Errorf("the progress line was not cleared before the error; the terminal was sent %q", raw)
+	}
 }

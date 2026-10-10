@@ -2,9 +2,10 @@
 // send and receive for handing a link over with a short code.
 //
 // stdout carries the result and nothing else, so `secretli share … | pbcopy`
-// copies exactly the link; everything said to the person goes to stderr
-// when stdout is not a terminal. With --json the result is JSON, errors
-// included. Nothing is ever asked when stdin is not a terminal.
+// copies exactly the link; everything said to the person goes to stderr.
+// With --json the result is JSON, errors included. Nothing is ever asked
+// when stdin is not a terminal. Colour is for stderr and the terminal's
+// questions, never for stdout.
 package cli
 
 import (
@@ -52,6 +53,9 @@ type env struct {
 	stdinTTY  bool
 	stdoutTTY bool
 	stderrTTY bool
+	// stderrEscapes is a stderr that is a terminal acting on escape codes,
+	// for colour and the progress line.
+	stderrEscapes bool
 
 	server string
 	json   bool
@@ -86,6 +90,11 @@ func execute(ctx context.Context, args []string, stdin, stdout, stderr *os.File)
 		stdinTTY:  term.IsTerminal(int(stdin.Fd())),
 		stdoutTTY: term.IsTerminal(int(stdout.Fd())),
 		stderrTTY: term.IsTerminal(int(stderr.Fd())),
+	}
+	if e.stderrTTY && os.Getenv("TERM") != "dumb" {
+		var restore func()
+		e.stderrEscapes, restore = enableEscapes(stderr)
+		defer restore()
 	}
 	root := newRoot(e)
 	root.SetArgs(args)
@@ -160,17 +169,13 @@ func (e *env) client(origin string) *api.Client {
 	return c
 }
 
-// say talks to the person: stderr when stdout is a pipe, stdout otherwise.
+// say talks to the person, on stderr, so that stdout stays the result.
 // Silent with --quiet or --json.
 func (e *env) say(format string, args ...any) {
 	if e.quiet || e.json {
 		return
 	}
-	w := e.stdout
-	if !e.stdoutTTY {
-		w = e.stderr
-	}
-	_, _ = fmt.Fprintf(w, format, args...)
+	_, _ = fmt.Fprintf(e.stderr, format, args...)
 }
 
 // note goes to stderr whatever the mode, unless quiet: warnings and progress.
@@ -199,7 +204,7 @@ func (e *env) report(err error) int {
 		_ = e.emitJSON(map[string]any{"error": message(err), "code": code})
 		return code
 	}
-	_, _ = fmt.Fprintf(e.stderr, "secretli: %s\n", message(err))
+	_, _ = fmt.Fprintf(e.stderr, "%s %s\n", paint(e.stderrColours(), red, "secretli:"), message(err))
 	if code == ExitUsage {
 		_, _ = fmt.Fprintf(e.stderr, "Run 'secretli --help' for usage.\n")
 	}

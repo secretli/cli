@@ -64,7 +64,7 @@ func (e *env) handOver(ctx context.Context, link share.Link, extra map[string]an
 	if e.json {
 		return e.emitJSON(map[string]any{"delivered": true})
 	}
-	e.say("Sent. The other device is opening the secret.\n")
+	e.done("Sent. The other device is opening the secret.\n")
 	return nil
 }
 
