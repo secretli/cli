@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/secretli/cli/internal/share"
 	"github.com/secretli/cli/internal/share/api"
@@ -165,15 +166,18 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	}
 }
 
-// choosingSink keeps only the files it chooses, and what it was offered.
+// choosingSink keeps only the files it chooses, and what it was offered
+// until when.
 type choosingSink struct {
 	memorySink
-	choose  []int
-	offered []bundle.Entry
+	choose   []int
+	offered  []bundle.Entry
+	deadline time.Time
 }
 
-func (c *choosingSink) Choose(_ context.Context, files []bundle.Entry) ([]int, error) {
+func (c *choosingSink) Choose(_ context.Context, files []bundle.Entry, deadline time.Time) ([]int, error) {
 	c.offered = files
+	c.deadline = deadline
 	return c.choose, nil
 }
 
@@ -208,6 +212,26 @@ func TestOpenReadsBundleVersion3AndOnlyTheChosenFiles(t *testing.T) {
 	}
 	if want := int64(len(big)) + 5; last != want || total != want {
 		t.Errorf("progress ended at %d of %d, want %d of %d", last, total, want, want)
+	}
+	// The files came from the server after the choice, which it allows
+	// until the retrieval session expires, 15 minutes after it began.
+	if left := time.Until(sink.deadline); left < 14*time.Minute || left > 15*time.Minute {
+		t.Errorf("deadline %v, %s from now", sink.deadline, left)
+	}
+
+	// Of a bundle fetched whole, nothing comes from the server after the
+	// choice: there is no deadline.
+	small := []bundle.Source{
+		{Name: "a.txt", Size: 1, Reader: strings.NewReader("a")},
+		{Name: "b.txt", Size: 1, Reader: strings.NewReader("b")},
+	}
+	l = sharetest.ShareStream(t, srv.URL, "bundle", true, small...)
+	sink = &choosingSink{}
+	if _, err := share.Open(ctx, c, l.Recipient(), "", sink, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.offered) != 2 || !sink.deadline.IsZero() || sink.files["b.txt"].String() != "b" {
+		t.Errorf("offered %+v until %v, saved %d files", sink.offered, sink.deadline, len(sink.files))
 	}
 
 	// A note in version 3 is text, and nothing is offered to choose from.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -231,6 +232,57 @@ func TestOneTimeFilesWarnBeforeTheQuestion(t *testing.T) {
 	}
 	if !strings.Contains(asked.String(), "[y/N]   1  a.txt  13 B\n  2  b.jpg  13 B\nFiles you don't save now are gone with this one-time secret.\nSave which?") {
 		t.Errorf("asked %q", asked.String())
+	}
+}
+
+// shareLargeFiles shares a.txt, which holds "this is a.txt", and big.bin,
+// which makes the secret too large to be fetched whole, so its files are
+// downloaded after the question. It returns the link and big.bin's content.
+func shareLargeFiles(t *testing.T, server string) (string, []byte) {
+	t.Helper()
+	dir := t.TempDir()
+	big := bytes.Repeat([]byte("this is big.bin\n"), 80*1024)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("this is a.txt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "big.bin"), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runCLI(t, "", "share", server, filepath.Join(dir, "a.txt"), filepath.Join(dir, "big.bin"))
+	if code != 0 {
+		t.Fatalf("share: exit %d, %q", code, stderr)
+	}
+	return strings.TrimSpace(stdout), big
+}
+
+// deadlineWarning is the warning before the question for a one-time secret
+// whose files are downloaded after it, as it reads for a secret opened
+// between from and to: the download may go on for 15 minutes.
+func deadlineWarning(from, to time.Time) []string {
+	var warnings []string
+	for _, at := range []time.Time{from, to} {
+		warnings = append(warnings, "Files you don't save by "+formatBy(at.Add(15*time.Minute), at)+" are gone with this one-time secret.\n")
+	}
+	return warnings
+}
+
+// A one-time secret downloaded after the question says by when its files
+// have to be saved.
+func TestLargeOneTimeFilesWarnOfTheDeadline(t *testing.T) {
+	srv := fakeServer(t)
+	link, big := shareLargeFiles(t, "--server="+srv.URL)
+	out := filepath.Join(t.TempDir(), "out")
+	asked := answeringInTurn(t, "y", "2")
+	from := time.Now()
+	if _, stderr, code := runCLI(t, "", "open", link, "--out", out); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	warnings := deadlineWarning(from, time.Now())
+	if !strings.Contains(asked.String(), "big.bin  1.2 MB\n"+warnings[0]+"Save which?") && !strings.Contains(asked.String(), "big.bin  1.2 MB\n"+warnings[1]+"Save which?") {
+		t.Errorf("asked %q, want the warning %q", asked.String(), warnings)
+	}
+	if got, err := os.ReadFile(filepath.Join(out, "big.bin")); err != nil || !bytes.Equal(got, big) {
+		t.Errorf("big.bin holds %d bytes, %v", len(got), err)
 	}
 }
 

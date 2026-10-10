@@ -43,7 +43,7 @@ curl -fsSLO "${BASE}/checksums.txt"
 grep "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" checksums.txt | shasum -a 256 -c -
 ```
 
-On Windows, download the `.zip`, unpack it, and add the folder containing `secretli.exe` to your PATH.
+On Windows, download the `.zip` for your system, `windows_amd64` or `windows_arm64`, unpack it, and add the folder containing `secretli.exe` to your PATH.
 
 With a Go toolchain:
 
@@ -67,7 +67,7 @@ Every share prints two links: the one to hand out, and the owner link, which can
 
 **Opening.** Text goes to stdout exactly as it was shared. Files are saved to the current directory or to `--out`, and nothing is overwritten unless you pass `--force`; `--stdout` streams a single file instead. Before anything is opened, the command says what the link points to. Opening a one-time secret uses it up, so for one of those it asks first, and Enter means no; `-y`/`--yes` opens it without asking. Reusable secrets open right away. Without an argument the link is read from stdin, or asked for, which keeps it out of your shell history too.
 
-When a secret holds several files, `open` lists them with their sizes and asks which to save. Enter saves them all; numbers, ranges and names or patterns pick some, as in `2`, `1 3`, `1-2` or `*.jpg`, and a list of more than 30 files shows the first 30, while numbers and patterns reach them all. Of a one-time secret, the files you don't save are gone with it, and it says so before it asks. Only the files you pick have to be new in the directory, unless you pass `--force`. `--stdout` asks for the one file to write. With `--yes` or `--json`, or where there is no terminal, nothing is asked: every file is saved, and `--stdout` needs a secret of a single file.
+When a secret holds several files, `open` lists them with their sizes and asks which to save. Enter saves them all; numbers, ranges and names or patterns pick some, as in `2`, `1 3`, `1-2` or `*.jpg`, and a list of more than 30 files shows the first 30, while numbers and patterns reach them all. Of a one-time secret, the files you don't save are gone with it, and it says so before it asks. A secret over 1 MiB is downloaded after the question, which the server allows for 15 minutes after it is opened, so for one of those it also says the time by which the files have to be saved. Only the files you pick have to be new in the directory, unless you pass `--force`. `--stdout` asks for the one file to write. With `--yes` or `--json`, or where there is no terminal, nothing is asked: every file is saved, and `--stdout` needs a secret of a single file.
 
 `-c`/`--copy` puts text on the clipboard instead of the terminal, so it doesn't stay in the scrollback. The final line break is left off, so pasting a password doesn't also press Enter. 45 seconds later the clipboard is cleared, unless you copied something else by then. Before anything is opened, `--copy` checks that there is a clipboard tool (`pbcopy`, `wl-copy`, `xclip`, `xsel` or `clip.exe`) and that the secret is text; should copying still fail, the text is printed after all, so a one-time secret isn't lost.
 
@@ -92,7 +92,7 @@ The exit code tells a script what happened:
 | 2 | wrong usage |
 | 3 | a password is needed, or it is wrong; a transfer code did not match |
 | 4 | the secret is gone or not found: opened, deleted, expired or no such link; a transfer code is unknown, used, expired or stopped |
-| 5 | the server did not answer, or is limiting requests |
+| 5 | the server could not be reached, did not answer within a minute, or is limiting requests |
 
 ```bash
 link=$(printf '%s' "$DB_PASSWORD" | secretli share -e 1h -q)
@@ -111,7 +111,7 @@ make test    # go test -race ./...
 make lint
 ```
 
-The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. CI runs the same tests against the real server too, the latest published image, so the fake cannot drift from it; checks that look inside the fake are skipped there. CI also runs the whole of Secretli with each change, from [secretli/e2e](https://github.com/secretli/e2e): the server, the web app and the browser with this client, and a release is only made when that passes for its tag. To do that locally, start a server with raised rate limits (the tests send many requests from one address) and point the tests at it:
+The tests run against a fake server that enforces the real one's rules on uploads, tokens, one-time secrets and short-code transfers. The questions are also tested at a real terminal, on Linux and macOS: those tests run the command in a pseudo-terminal, type the answers and Ctrl-C, and check what it shows, echo included. CI runs the same tests against the real server too, the latest published image, so the fake cannot drift from it; checks that look inside the fake are skipped there. CI also runs the whole of Secretli with each change, from [secretli/e2e](https://github.com/secretli/e2e): the server, the web app and the browser with this client, and a release is only made when that passes for its tag. To do that locally, start a server with raised rate limits (the tests send many requests from one address) and point the tests at it:
 
 ```bash
 # Postgres and SeaweedFS from a checkout of secretli/server, then the server image

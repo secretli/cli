@@ -2,6 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/secretli/cli/internal/share/api"
 	"github.com/secretli/cli/internal/share/sharetest"
 )
 
@@ -283,6 +287,25 @@ func TestUsageAndInputRules(t *testing.T) {
 	}
 }
 
+// A server that takes requests and never answers ends the command after the
+// timeout, as a server that did not answer, instead of leaving it hanging.
+func TestAServerThatNeverAnswers(t *testing.T) {
+	before := api.ResponseHeaderTimeout
+	api.ResponseHeaderTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { api.ResponseHeaderTimeout = before })
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// Once the request is read, the server notices the client leave.
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	_, stderr, code := runCLI(t, "", "share", "--server="+srv.URL, "-t", "x")
+	if want := "secretli: network error: " + srv.URL + " did not answer in time\n"; code != ExitServer || stderr != want {
+		t.Errorf("exit %d, stderr %q, want %d, %q", code, stderr, ExitServer, want)
+	}
+}
+
 func TestFormatting(t *testing.T) {
 	now := time.Date(2026, 10, 5, 19, 53, 0, 0, time.Local) // a Monday
 	cases := map[string]time.Time{
@@ -297,6 +320,16 @@ func TestFormatting(t *testing.T) {
 	for want, at := range cases {
 		if got := formatMoment(at, now); got != want {
 			t.Errorf("formatMoment(%v) = %q, want %q", at, got, want)
+		}
+	}
+	byCases := map[string]time.Time{
+		"23:30":             time.Date(2026, 10, 5, 23, 30, 0, 0, time.Local),
+		"tomorrow at 00:10": time.Date(2026, 10, 6, 0, 10, 0, 0, time.Local),
+		"12 Oct at 19:53":   time.Date(2026, 10, 12, 19, 53, 0, 0, time.Local),
+	}
+	for want, at := range byCases {
+		if got := formatBy(at, now); got != want {
+			t.Errorf("formatBy(%v) = %q, want %q", at, got, want)
 		}
 	}
 	if got := formatSize(1536); got != "1.5 KB" {
