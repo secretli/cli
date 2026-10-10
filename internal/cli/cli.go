@@ -215,6 +215,9 @@ func exitCode(err error) int {
 	var ended *transfer.EndedError
 	var apiErr *api.Error
 	switch {
+	case errors.Is(err, context.Canceled):
+		// Ctrl-C, whatever was going on: at the password prompt, say.
+		return ExitError
 	case errors.Is(err, share.ErrPasswordRequired), errors.Is(err, share.ErrWrongPassword), errors.Is(err, transfer.ErrCodeMismatch):
 		return ExitPassword
 	case errors.As(err, &notFound), errors.As(err, &ended),
@@ -222,8 +225,6 @@ func exitCode(err error) int {
 		return ExitGone
 	case errors.As(err, &apiErr) && (apiErr.Status == 0 || apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests):
 		return ExitServer
-	case errors.Is(err, context.Canceled):
-		return ExitError
 	}
 	return ExitError
 }
