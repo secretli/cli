@@ -12,7 +12,7 @@ import (
 	"github.com/secretli/cli/internal/share"
 	"github.com/secretli/cli/internal/share/api"
 	"github.com/secretli/cli/internal/share/sharetest"
-	"github.com/secretli/format/bundle"
+	"github.com/secretli/format/go/bundle"
 )
 
 // memorySink keeps what Open hands over.
