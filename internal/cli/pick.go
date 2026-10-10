@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/secretli/format/bundle"
+	"github.com/secretli/format/go/bundle"
 )
 
 // pickFiles reads the answer to "Save which?". An empty answer is every

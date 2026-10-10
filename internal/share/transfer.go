@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/secretli/cli/internal/share/api"
-	"github.com/secretli/format/transfer"
+	"github.com/secretli/format/go/transfer"
 )
 
 // closeTimeout bounds the request that releases the other side after an

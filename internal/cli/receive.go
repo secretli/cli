@@ -13,7 +13,7 @@ import (
 
 	"github.com/secretli/cli/internal/share"
 	"github.com/secretli/cli/internal/share/api"
-	"github.com/secretli/format/transfer"
+	"github.com/secretli/format/go/transfer"
 )
 
 type receiveOptions struct {

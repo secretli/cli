@@ -19,9 +19,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/secretli/cli/internal/share/api"
-	"github.com/secretli/format/bundle"
-	"github.com/secretli/format/keys"
-	"github.com/secretli/format/link"
+	"github.com/secretli/format/go/bundle"
+	"github.com/secretli/format/go/keys"
+	"github.com/secretli/format/go/link"
 )
 
 const (

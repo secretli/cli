@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/secretli/cli/internal/share"
-	"github.com/secretli/format/keys"
+	"github.com/secretli/format/go/keys"
 )
 
 func TestDescribeInfoSaysWhetherAReusableSecretWasOpenedToItsOwnerOnly(t *testing.T) {

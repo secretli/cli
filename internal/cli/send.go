@@ -12,7 +12,7 @@ import (
 
 	"github.com/secretli/cli/internal/share"
 	"github.com/secretli/cli/internal/share/api"
-	"github.com/secretli/format/transfer"
+	"github.com/secretli/format/go/transfer"
 )
 
 func newSendCmd(e *env) *cobra.Command {
