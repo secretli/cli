@@ -75,7 +75,7 @@ When a secret holds several files, `open` lists them with their sizes and asks w
 
 `receive` opens what it receives like `open` does, with the same `--out`, `--stdout`, `--force`, `--yes`, `--copy` and password options, or prints the link with `--link` (with `--copy`, it copies the link). If you decline to open a one-time secret, it prints the link instead, since the code is used up by then. Typing is forgiving: `7 acid rocket`, `7-ACID-ROCKET` and `7-aci-roc` all work.
 
-**Checking and deleting.** `status` describes a secret from its link without opening it: one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. Once a secret is gone, opened, deleted or expired, the server keeps nothing about it, so all `status` can say then is that it is gone, to the owner as to a recipient, as it does for a link to nothing. The exit code is 4 then, and with `--json` the state is `live` or `gone`. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
+**Checking and deleting.** `status` describes a secret from its link without opening it: text or files, one-time or reusable, password or not, when it was sent and when it expires, and whether it has been opened. Once a secret is gone, opened, deleted or expired, the server keeps nothing about it, so all `status` can say then is that it is gone, to the owner as to a recipient, as it does for a link to nothing. The exit code is 4 then, and with `--json` the state is `live` or `gone`. `delete` takes the owner link and asks before it deletes, unless you pass `--yes`.
 
 ## Scripts
 
@@ -125,7 +125,7 @@ SECRETLI_TEST_SERVER=http://localhost:8080 make test
 
 On macOS, where `--network host` does not reach the host, run the server on the compose network instead and publish its port.
 
-Releases are made by pushing a tag such as `v0.5.0`; the release workflow builds the binaries, writes `checksums.txt`, attests every file and creates the GitHub release.
+Releases are made by pushing an annotated tag such as `v0.12.0` on `main`. The release workflow builds the binaries and runs the whole of Secretli with the tag's client; only if that passes does it write `checksums.txt`, attest every file and create the GitHub release. Its last job writes the new formula to [secretli/homebrew-tap](https://github.com/secretli/homebrew-tap), except for pre-releases (tags with a dash). Afterwards, bump the version in the install commands above.
 
 ## License
 
