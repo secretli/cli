@@ -43,7 +43,7 @@ curl -fsSLO "${BASE}/checksums.txt"
 grep "secretli_${VERSION}_${OS}_${ARCH}.tar.gz" checksums.txt | shasum -a 256 -c -
 ```
 
-On Windows, download the `.zip`, unpack it, and add the folder containing `secretli.exe` to your PATH.
+On Windows, download the `.zip` for your system, `windows_amd64` or `windows_arm64`, unpack it, and add the folder containing `secretli.exe` to your PATH.
 
 With a Go toolchain:
 
