@@ -92,7 +92,7 @@ The exit code tells a script what happened:
 | 2 | wrong usage |
 | 3 | a password is needed, or it is wrong; a transfer code did not match |
 | 4 | the secret is gone or not found: opened, deleted, expired or no such link; a transfer code is unknown, used, expired or stopped |
-| 5 | the server did not answer, or is limiting requests |
+| 5 | the server could not be reached, did not answer within a minute, or is limiting requests |
 
 ```bash
 link=$(printf '%s' "$DB_PASSWORD" | secretli share -e 1h -q)

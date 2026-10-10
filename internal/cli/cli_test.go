@@ -2,6 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/secretli/cli/internal/share/api"
 	"github.com/secretli/cli/internal/share/sharetest"
 )
 
@@ -280,6 +284,25 @@ func TestUsageAndInputRules(t *testing.T) {
 	// The server's error, with the request id, when it is down.
 	if _, stderr, code := runCLI(t, "", "share", "--server=http://127.0.0.1:1", "-t", "x"); code != ExitServer || !strings.Contains(stderr, "network error") {
 		t.Errorf("server down: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// A server that takes requests and never answers ends the command after the
+// timeout, as a server that did not answer, instead of leaving it hanging.
+func TestAServerThatNeverAnswers(t *testing.T) {
+	before := api.ResponseHeaderTimeout
+	api.ResponseHeaderTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { api.ResponseHeaderTimeout = before })
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// Once the request is read, the server notices the client leave.
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	_, stderr, code := runCLI(t, "", "share", "--server="+srv.URL, "-t", "x")
+	if want := "secretli: network error: " + srv.URL + " did not answer in time\n"; code != ExitServer || stderr != want {
+		t.Errorf("exit %d, stderr %q, want %d, %q", code, stderr, ExitServer, want)
 	}
 }
 

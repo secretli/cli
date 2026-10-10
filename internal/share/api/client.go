@@ -12,15 +12,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 const (
 	// MaxTransientAttempts is how often a request is tried when the failure
-	// looks temporary: a network error, rate limiting, or a server error.
+	// looks temporary: a failed connection, rate limiting, or a server error.
 	MaxTransientAttempts = 3
 	maxRetryAfter        = 30 * time.Second
 
@@ -33,28 +36,43 @@ const (
 	headerPartSHA256    = "X-Part-SHA256"
 )
 
+// ResponseHeaderTimeout is how long a request waits for the server's answer
+// to begin, once the request is sent, body and all. The longest wait the
+// server means to make is a transfer's long-poll, which it holds for 25 s.
+// The answer's body takes as long as it takes. A variable, so that tests can
+// shorten it.
+var ResponseHeaderTimeout = 60 * time.Second
+
 // Client talks to one Secretli server.
 type Client struct {
 	// BaseURL is the server's origin, such as https://secretli.app.
 	BaseURL string
-	// HTTP is the client used for every request. Cancellation and deadlines
-	// come from the context, so it needs no timeout of its own.
+	// HTTP is the client used for every request. Cancellation comes from the
+	// context; New gives it a transport that stops waiting for a server
+	// that doesn't answer, and no limit on a whole request, so that large
+	// uploads and downloads aren't cut off.
 	HTTP      *http.Client
 	UserAgent string
 }
 
 // New makes a client for the server at baseURL.
 func New(baseURL string) *Client {
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTP: &http.Client{}, UserAgent: "secretli-cli"}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = ResponseHeaderTimeout
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTP: &http.Client{Transport: transport}, UserAgent: "secretli-cli"}
 }
 
-// Error is an answer the server gave that was not a success.
+// Error is an answer the server gave that was not a success, or, with
+// Status 0, no answer at all.
 type Error struct {
 	Status     int
 	Message    string
 	RequestID  string
 	RetryAfter string
 	Details    map[string]any
+	// Timeout is a request the server took and did not answer in time; it
+	// is not sent again.
+	Timeout bool
 }
 
 func (e *Error) Error() string {
@@ -288,7 +306,7 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 		}
 		lastErr = err
 		var apiErr *Error
-		if !errors.As(err, &apiErr) || !transient(apiErr.Status) || attempt == MaxTransientAttempts {
+		if !errors.As(err, &apiErr) || !transient(apiErr) || attempt == MaxTransientAttempts {
 			return nil, err
 		}
 		if err := sleep(ctx, retryDelay(attempt, apiErr.RetryAfter)); err != nil {
@@ -303,7 +321,12 @@ func (c *Client) once(ctx context.Context, method, path string, headers http.Hea
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
+	// Whether the request went out tells the timeouts apart: one before it,
+	// while connecting or in the TLS handshake, is a failed connection like
+	// any other, and one after it is the server not answering.
+	var sent atomic.Bool
+	trace := &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) { sent.Store(info.Err == nil) }}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, c.BaseURL+path, reader)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -321,6 +344,9 @@ func (c *Client) once(ctx context.Context, method, path string, headers http.Hea
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if noAnswer(err, sent.Load()) {
+			return nil, &Error{Message: c.BaseURL + " did not answer in time", RequestID: requestID, Timeout: true}
 		}
 		return nil, &Error{Message: err.Error(), RequestID: requestID}
 	}
@@ -347,10 +373,23 @@ func (c *Client) once(ctx context.Context, method, path string, headers http.Hea
 	return nil, apiErr
 }
 
-// transient is a failure worth retrying: no answer, rate limiting, or a
-// server error. Client errors are final.
-func transient(status int) bool {
-	return status == 0 || status == http.StatusTooManyRequests || status >= 500
+// noAnswer reports whether err is a timeout after the request was sent:
+// ResponseHeaderTimeout running out. The transport's other timeouts, for
+// connecting and the TLS handshake, come before the request goes out.
+func noAnswer(err error, sent bool) bool {
+	netErr, ok := errors.AsType[net.Error](err)
+	return sent && ok && netErr.Timeout()
+}
+
+// transient is a failure worth retrying: a connection that failed, timeouts
+// while connecting included, rate limiting, or a server error. Client
+// errors are final, and so is a server that took the request and did not
+// answer in time: it has had its full wait already, asking again would make
+// the wait three times as long, and it may still be working on a request
+// that is no use twice, such as opening a one-time secret.
+func transient(err *Error) bool {
+	status := err.Status
+	return (status == 0 && !err.Timeout) || status == http.StatusTooManyRequests || status >= 500
 }
 
 func retryDelay(attempt int, retryAfter string) time.Duration {

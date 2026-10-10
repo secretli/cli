@@ -156,7 +156,6 @@ func normalizeServer(s string) string {
 
 func (e *env) client(origin string) *api.Client {
 	c := api.New(origin)
-	c.HTTP = &http.Client{}
 	c.UserAgent = "secretli-cli/" + version()
 	return c
 }
