@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -223,26 +222,32 @@ func TestTerminalOpenItNow(t *testing.T) {
 
 func TestTerminalSaveWhich(t *testing.T) {
 	srv := fakeServer(t)
-	link := shareFiles(t, "--server="+srv.URL, []string{"a.txt", "b.jpg"})
+	link, big := shareLargeFiles(t, "--server="+srv.URL)
 	out := filepath.Join(t.TempDir(), "out")
+	question := "Save which? [Enter = all, or e.g. 2 · 1 3 · 1-2 · *.jpg] "
 
 	c := startAtTerminal(t, "open", link, "--out", out)
 	c.expect("[y/N] ")
+	from := time.Now()
 	c.typ("y\r")
-	c.expect("  1  a.txt  13 B\r\n  2  b.jpg  13 B\r\n")
-	c.expect("Files you don't save now are gone with this one-time secret.\r\n")
-	question := "Save which? [Enter = all, or e.g. 2 · 1 3 · 1-2 · *.jpg] "
-	c.expect(question)
+	shown := c.expect(question)
+	// The terminal starts each line at the left again.
+	list := "  1  a.txt      13 B\r\n  2  big.bin  1.2 MB\r\n"
+	warnings := deadlineWarning(from, time.Now())
+	if !strings.Contains(shown, list+strings.ReplaceAll(warnings[0], "\n", "\r\n")) && !strings.Contains(shown, list+strings.ReplaceAll(warnings[1], "\n", "\r\n")) {
+		t.Errorf("the terminal shows %q before the question, want the list and the warning %q", shown, warnings)
+	}
 	c.typ("3\r")
 	c.expect("there is no file 3; the files are numbered 1 to 2\r\n")
 	c.expect(question)
-	c.typ("*.JPG\r")
-	c.expect("Saved b.jpg (13 B) to " + out + ".")
+	c.typ("*.BIN\r")
+	c.expect("Saved big.bin (1.2 MB) to " + out + ".")
 	if code := c.exitCode(); code != 0 {
 		t.Fatalf("exit %d; the terminal shows:\n%s", code, c.screen())
 	}
-	if got := savedIn(t, out); !reflect.DeepEqual(got, []string{"b.jpg"}) {
-		t.Errorf("saved %v", got)
+	entries, _ := os.ReadDir(out)
+	if got, err := os.ReadFile(filepath.Join(out, "big.bin")); len(entries) != 1 || err != nil || !bytes.Equal(got, big) {
+		t.Errorf("saved %d files, big.bin holds %d bytes, %v", len(entries), len(got), err)
 	}
 }
 

@@ -328,9 +328,14 @@ type Sink interface {
 // to pick the ones it wants and to check names and sizes while nothing has
 // been written yet. Choose returns the indexes of the files to decrypt, nil
 // meaning all of them; only those reach File.
+//
+// deadline is when the server stops handing out the secret: files that are
+// not decrypted by then cannot be, and of a one-time secret they are gone.
+// It is zero when nothing more comes from the server, because the bundle
+// was small enough to be fetched whole.
 type ChoosingSink interface {
 	Sink
-	Choose(ctx context.Context, files []bundle.Entry) ([]int, error)
+	Choose(ctx context.Context, files []bundle.Entry, deadline time.Time) ([]int, error)
 }
 
 // Opened is what Open found.
@@ -404,7 +409,13 @@ func Open(ctx context.Context, c *api.Client, link Link, password string, sink S
 
 	var chosen []int
 	if cs, ok := sink.(ChoosingSink); ok {
-		if chosen, err = cs.Choose(ctx, b.Files); err != nil {
+		// Of a larger bundle, the files come from the server as they are
+		// decrypted, which the retrieval session allows until it expires.
+		var deadline time.Time
+		if session.BlobSize > bundle.SmallBundleBytes {
+			deadline = session.ExpiresAt
+		}
+		if chosen, err = cs.Choose(ctx, b.Files, deadline); err != nil {
 			return nil, err
 		}
 	}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/secretli/cli/internal/share"
@@ -28,6 +29,17 @@ func formatMoment(t, now time.Time) string {
 		return "on " + t.Format("2 Jan") + " at " + clock
 	}
 	return "on " + t.Format("2 Jan 2006") + " at " + clock
+}
+
+// formatBy says a moment after "by": the time alone today, as in "by
+// 19:42", and formatMoment's words on another day, as in "by tomorrow at
+// 00:05".
+func formatBy(t, now time.Time) string {
+	moment := formatMoment(t, now)
+	if clock, today := strings.CutPrefix(moment, "today at "); today {
+		return clock
+	}
+	return strings.TrimPrefix(moment, "on ")
 }
 
 // formatAgo says how long ago something happened.

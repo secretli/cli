@@ -322,6 +322,16 @@ func TestFormatting(t *testing.T) {
 			t.Errorf("formatMoment(%v) = %q, want %q", at, got, want)
 		}
 	}
+	byCases := map[string]time.Time{
+		"23:30":             time.Date(2026, 10, 5, 23, 30, 0, 0, time.Local),
+		"tomorrow at 00:10": time.Date(2026, 10, 6, 0, 10, 0, 0, time.Local),
+		"12 Oct at 19:53":   time.Date(2026, 10, 12, 19, 53, 0, 0, time.Local),
+	}
+	for want, at := range byCases {
+		if got := formatBy(at, now); got != want {
+			t.Errorf("formatBy(%v) = %q, want %q", at, got, want)
+		}
+	}
 	if got := formatSize(1536); got != "1.5 KB" {
 		t.Errorf("formatSize = %q", got)
 	}

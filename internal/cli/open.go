@@ -252,7 +252,7 @@ type savedFile struct {
 // Choose picks the files to save: every one, or, at a terminal and when
 // there are several, the ones named in the answer. Before anything is
 // written it checks that none of the chosen files would overwrite one.
-func (s *fileSink) Choose(ctx context.Context, files []bundle.Entry) ([]int, error) {
+func (s *fileSink) Choose(ctx context.Context, files []bundle.Entry, deadline time.Time) ([]int, error) {
 	var t *terminal
 	if s.ask && len(files) > 1 {
 		if tt, err := s.e.terminal(); err == nil {
@@ -267,7 +267,7 @@ func (s *fileSink) Choose(ctx context.Context, files []bundle.Entry) ([]int, err
 		case t == nil:
 			return nil, fmt.Errorf("--stdout is for a single file, and this secret has %d", len(files))
 		}
-		return s.pick(ctx, t, files, "Which one? ", func(chosen []int) error {
+		return s.pick(ctx, t, files, deadline, "Which one? ", func(chosen []int) error {
 			if len(chosen) != 1 {
 				return errors.New("--stdout writes a single file; pick one")
 			}
@@ -277,17 +277,23 @@ func (s *fileSink) Choose(ctx context.Context, files []bundle.Entry) ([]int, err
 	if t == nil {
 		return nil, s.prepare(files, nil)
 	}
-	return s.pick(ctx, t, files, "Save which? [Enter = all, or e.g. 2 · 1 3 · 1-2 · *.jpg] ", func(chosen []int) error {
+	return s.pick(ctx, t, files, deadline, "Save which? [Enter = all, or e.g. 2 · 1 3 · 1-2 · *.jpg] ", func(chosen []int) error {
 		return s.prepare(files, chosen)
 	})
 }
 
 // pick lists the files on the terminal and asks until the answer names
-// files that check accepts.
-func (s *fileSink) pick(ctx context.Context, t *terminal, files []bundle.Entry, question string, check func(chosen []int) error) ([]int, error) {
+// files that check accepts. Of a one-time secret, it says first that the
+// files not saved are gone, and by when they have to be saved, if the
+// download goes on after the question.
+func (s *fileSink) pick(ctx context.Context, t *terminal, files []bundle.Entry, deadline time.Time, question string, check func(chosen []int) error) ([]int, error) {
 	listFiles(t.out, files)
 	if s.oneTime {
-		_, _ = fmt.Fprintln(t.out, "Files you don't save now are gone with this one-time secret.")
+		when := "now"
+		if !deadline.IsZero() {
+			when = "by " + formatBy(deadline, time.Now())
+		}
+		_, _ = fmt.Fprintf(t.out, "Files you don't save %s are gone with this one-time secret.\n", when)
 	}
 	names := make([]string, len(files))
 	for i, f := range files {
