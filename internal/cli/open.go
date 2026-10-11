@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,9 @@ func newOpenCmd(e *env) *cobra.Command {
 		Short: "Open a secret: text to stdout, files to disk",
 		Long: `Opens a link. Text is written to stdout exactly as it was shared; files are
 saved to the current directory, or to --out, and never overwrite anything
-unless --force is given.
+unless --force is given. At a terminal, control characters in the text, which
+could steer the terminal, are shown as a replacement character, and you are
+told; --copy, or stdout to a file or pipe, gives the exact text.
 
 Of a secret with several files, at a terminal, the files are listed and you
 are asked which to save: Enter saves them all, and numbers, ranges and
@@ -85,7 +88,7 @@ func addOpenFlags(cmd *cobra.Command, o *openOptions) {
 	f := cmd.Flags()
 	f.StringVarP(&o.out, "out", "o", ".", "the directory files are saved to")
 	f.BoolVar(&o.toStdout, "stdout", false, "write a single file to stdout instead of saving it")
-	f.BoolVar(&o.force, "force", false, "overwrite files that already exist")
+	f.BoolVar(&o.force, "force", false, "replace files that already exist with the new ones")
 	f.BoolVarP(&o.password, "password", "p", false, "the secret has a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVarP(&o.yes, "yes", "y", false, "open a one-time secret without asking; needed when not at a terminal")
@@ -244,6 +247,9 @@ type fileSink struct {
 
 	text  []byte
 	saved []savedFile
+	// paths is where each chosen file goes, by its index in the bundle,
+	// settled before anything is written.
+	paths map[int]string
 }
 
 type savedFile struct {
@@ -318,14 +324,15 @@ func (s *fileSink) pick(ctx context.Context, t *terminal, files []bundle.Entry, 
 	}
 }
 
-// prepare makes the output directory and checks that none of the chosen
-// files, nil meaning all, exists there.
+// prepare makes the output directory and settles where each of the
+// chosen files, nil meaning all, goes: under its name as diskName makes
+// it, numbered when another file of the bundle got that name first, so
+// that every one can be written. It checks that none of them exists, or
+// with --force that none is a directory, before anything is written: the
+// secret may be used up already, and a stop half-way would lose the rest.
 func (s *fileSink) prepare(files []bundle.Entry, chosen []int) error {
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", s.dir, err)
-	}
-	if s.force {
-		return nil
 	}
 	if chosen == nil {
 		chosen = make([]int, len(files))
@@ -333,12 +340,30 @@ func (s *fileSink) prepare(files []bundle.Entry, chosen []int) error {
 			chosen[i] = i
 		}
 	}
+	paths := make(map[int]string, len(chosen))
+	// Names already given, in lower case: APFS and NTFS ignore case.
+	given := make(map[string]bool, len(chosen))
 	for _, i := range chosen {
-		path := filepath.Join(s.dir, safeName(files[i].Name))
-		if _, err := os.Stat(path); err == nil {
-			return fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
+		name := diskName(files[i].Name)
+		for n := 2; given[strings.ToLower(name)]; n++ {
+			name = numbered(diskName(files[i].Name), n)
 		}
+		given[strings.ToLower(name)] = true
+		path := filepath.Join(s.dir, name)
+		// Lstat: a link counts as there, even one that leads nowhere.
+		info, err := os.Lstat(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case err != nil:
+			return err
+		case !s.force:
+			return fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
+		case info.IsDir():
+			return fmt.Errorf("%s is a directory; use --out for another directory", path)
+		}
+		paths[files[i].Index] = path
 	}
+	s.paths = paths
 	return nil
 }
 
@@ -352,12 +377,21 @@ func (s *fileSink) File(f bundle.Entry) (io.WriteCloser, error) {
 		s.saved = append(s.saved, savedFile{Name: f.Name, Size: f.Size})
 		return nopWriteCloser{s.e.stdout}, nil
 	}
-	path := filepath.Join(s.dir, safeName(f.Name))
-	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if !s.force {
-		flags |= os.O_EXCL
+	path, ok := s.paths[f.Index]
+	if !ok {
+		return nil, fmt.Errorf("%s was not among the files to save", printable(f.Name))
 	}
-	file, err := os.OpenFile(path, flags, 0o600) //nolint:gosec // the name is sanitised and confined to the output directory
+	if s.force {
+		// --force replaces what is there rather than writing into it: a
+		// link would carry the content elsewhere, and a hard link would
+		// change another file as well.
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+	}
+	// Always a new file: should something have appeared there since, this
+	// fails rather than write through it.
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the name is sanitised and confined to the output directory
 	if err != nil {
 		return nil, err
 	}
@@ -365,19 +399,31 @@ func (s *fileSink) File(f bundle.Entry) (io.WriteCloser, error) {
 	return file, nil
 }
 
+// writeText prints a text secret: into a pipe or a file exactly as it was
+// shared, and at a terminal without control characters, which could steer
+// it, saying so if there were any.
+func (e *env) writeText(text []byte) error {
+	if !e.stdoutTTY {
+		_, err := e.stdout.Write(text)
+		return err
+	}
+	shown, changed := printableText(text)
+	if _, err := io.WriteString(e.stdout, shown); err != nil {
+		return err
+	}
+	if shown != "" && !strings.HasSuffix(shown, "\n") {
+		_, _ = fmt.Fprintln(e.stdout)
+	}
+	if changed {
+		// Even with --quiet: what was printed is not quite the secret.
+		_, _ = fmt.Fprint(e.stderr, "The secret holds control characters, shown as \uFFFD; --copy, or stdout to a file or pipe, gives the exact text.\n")
+	}
+	return nil
+}
+
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
-
-// safeName keeps a shared file's name from leaving the output directory.
-func safeName(name string) string {
-	name = strings.ReplaceAll(name, "\\", "/")
-	name = filepath.Base(filepath.Clean("/" + name))
-	if name == "" || name == "/" || name == "." {
-		return "file"
-	}
-	return name
-}
 
 func (e *env) printOpened(opened *share.Opened, sink *fileSink, copyText bool) error {
 	if e.json {
@@ -399,20 +445,18 @@ func (e *env) printOpened(opened *share.Opened, sink *fileSink, copyText bool) e
 		if copyText {
 			return e.copySecret(string(sink.text), "the secret")
 		}
-		if _, err := e.stdout.Write(sink.text); err != nil {
-			return err
-		}
-		if e.stdoutTTY && len(sink.text) > 0 && sink.text[len(sink.text)-1] != '\n' {
-			_, _ = fmt.Fprintln(e.stdout)
-		}
-		return nil
+		return e.writeText(sink.text)
 	}
 	if sink.toStdout {
 		return nil
 	}
 	names := make([]string, 0, len(sink.saved))
 	for _, f := range sink.saved {
-		names = append(names, fmt.Sprintf("%s (%s)", printable(f.Name), formatSize(f.Size)))
+		name := printable(f.Name)
+		if saved := filepath.Base(f.Path); saved != f.Name {
+			name += " as " + printable(saved)
+		}
+		names = append(names, fmt.Sprintf("%s (%s)", name, formatSize(f.Size)))
 	}
 	e.done("Saved %s to %s.\n", strings.Join(names, ", "), sink.dir)
 	return nil

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -153,11 +152,7 @@ func withoutFinalLineBreak(text string) string {
 func (e *env) copySecret(text, what string) error {
 	if err := e.copyAndClear(withoutFinalLineBreak(text), what); err != nil {
 		e.note("Couldn't copy to the clipboard (%v), so here it is:\n", err)
-		_, err := io.WriteString(e.stdout, text)
-		if err == nil && e.stdoutTTY && !strings.HasSuffix(text, "\n") {
-			_, err = fmt.Fprintln(e.stdout)
-		}
-		return err
+		return e.writeText([]byte(text))
 	}
 	return nil
 }

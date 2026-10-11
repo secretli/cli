@@ -238,7 +238,8 @@ func message(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "interrupted"
 	}
-	return err.Error()
+	// Parts of a message may come from the server, or name a sender's file.
+	return printableMessage(err.Error())
 }
 
 // run wraps a command's work so its errors are told apart from usage errors.

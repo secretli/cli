@@ -338,12 +338,6 @@ func TestFormatting(t *testing.T) {
 	if got := formatAgo(now.Add(-3*time.Minute), now); got != "3 minutes ago" {
 		t.Errorf("formatAgo = %q", got)
 	}
-	if got := safeName("../../etc/passwd"); got != "passwd" {
-		t.Errorf("safeName = %q", got)
-	}
-	if got := safeName("..\\..\\x.txt"); got != "x.txt" {
-		t.Errorf("safeName backslashes = %q", got)
-	}
 }
 
 // A link has to open, so share and receive refuse http to another machine

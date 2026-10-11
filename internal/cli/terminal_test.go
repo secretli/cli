@@ -314,6 +314,26 @@ func TestTerminalPasswordIsNotShown(t *testing.T) {
 	}
 }
 
+// At a terminal, a text secret shows without the control characters that
+// could steer it, and the command says that it held some.
+func TestTerminalShowsASecretWithoutControlCharacters(t *testing.T) {
+	srv := fakeServer(t)
+	link, _ := shareText(t, "--server="+srv.URL, "title\x1b]0;PWNED\x07 red\x1b[31m done", "--reusable")
+
+	// --quiet too says that what is shown is not quite the secret.
+	for _, args := range [][]string{{"open", link}, {"open", link, "--quiet"}} {
+		c := startAtTerminal(t, args...)
+		c.expect("done")
+		c.expect("The secret holds control characters")
+		if code := c.exitCode(); code != 0 {
+			t.Fatalf("%v: exit %d; the terminal shows:\n%s", args, code, c.screen())
+		}
+		if raw := c.raw(); strings.Contains(raw, "\x1b]0;PWNED") || strings.Contains(raw, "\x1b[31m done") {
+			t.Errorf("%v: the secret's escape sequences reached the terminal: %q", args, raw)
+		}
+	}
+}
+
 // A link or a code typed at the prompt is a key, so it isn't shown: it
 // stays out of the scrollback, as a password does.
 func TestTerminalLinkAndCodeAreNotShown(t *testing.T) {
