@@ -39,7 +39,8 @@ which still works. Where there is no terminal to ask on, receive needs
 
 Typing is forgiving: "7 acid rocket", "7-ACID-ROCKET" and "7-aci-roc" all
 work. A wrong code ends the transfer on both sides; ask for a new one.
-Without an argument the code is read from stdin, or asked for at a terminal.`,
+Without an argument the code is read from stdin, or asked for at a terminal
+without showing it. A misspelt word is caught before the code is used.`,
 		Example: `  secretli receive 7-acid-rocket
   secretli receive 7 acid rocket --out ./received
   secretli receive 7-acid-rocket --link`,
@@ -135,7 +136,8 @@ func (e *env) codeArg(ctx context.Context, args []string) (transfer.Code, error)
 			return transfer.Code{}, errors.New("no code given")
 		}
 		defer t.close()
-		if raw, err = t.askLine(ctx, "Code: "); err != nil {
+		// The words are the key to the transfer, so they aren't shown.
+		if raw, err = t.askSecret(ctx, "Code (not shown): "); err != nil {
 			return transfer.Code{}, err
 		}
 	}
