@@ -23,8 +23,6 @@ import (
 	"time"
 )
 
-const minPartBytes = 5 * 1024 * 1024
-
 var expirations = []string{"5m", "10m", "15m", "1h", "4h", "12h", "1d", "3d", "7d"}
 
 // Server is the fake, listening on a loopback port.
@@ -208,11 +206,15 @@ func (s *Server) uploadPart(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.ParseInt(r.Header.Get("X-Part-Offset"), 10, 64)
 	size, _ := strconv.ParseInt(r.Header.Get("X-Part-Size"), 10, 64)
 	data, _ := io.ReadAll(r.Body)
-	if n <= 0 || int64(len(data)) != size || size > s.partSize+1024*1024 || r.Header.Get("X-Part-SHA256") != sha256Hex(data) {
+	if n <= 0 || int64(len(data)) != size || r.Header.Get("X-Part-SHA256") != sha256Hex(data) {
 		writeError(w, 400, "bad part", nil)
 		return
 	}
-	if offset+size > up.req.BlobSize || (offset+size < up.req.BlobSize && size < minPartBytes) {
+	// Like the real server: part n starts at (n-1) times the part size and
+	// is exactly that long, but for the last, which holds the rest.
+	parts := (up.req.BlobSize + s.partSize - 1) / s.partSize
+	wantOffset := int64(n-1) * s.partSize
+	if int64(n) > parts || offset != wantOffset || size != min(s.partSize, up.req.BlobSize-wantOffset) {
 		writeError(w, 400, "part placement", nil)
 		return
 	}
