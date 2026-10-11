@@ -62,7 +62,10 @@ jobs:
   # Nothing is released unless it passes.
   whole-setup:
     uses: secretli/e2e/.github/workflows/whole-setup.yml@main
-    secrets: inherit
+    # Only what whole-setup uses: not every secret of this repository, which
+    # includes the Homebrew tap's deploy key.
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
       cli_ref: ${{ github.sha }}
 
