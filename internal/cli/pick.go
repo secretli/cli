@@ -6,7 +6,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/secretli/format/go/bundle"
@@ -120,17 +119,6 @@ func listFiles(w io.Writer, files []bundle.Entry) {
 	if more := len(files) - len(shown); more > 0 {
 		_, _ = fmt.Fprintf(w, "  … and %s more\n", thousands(more))
 	}
-}
-
-// printable keeps a file's name, which the sender chose, from sending
-// control characters to the terminal.
-func printable(name string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return '?'
-		}
-		return r
-	}, name)
 }
 
 // thousands writes a count with commas between the thousands, like 1,970.

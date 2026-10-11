@@ -314,6 +314,23 @@ func TestTerminalPasswordIsNotShown(t *testing.T) {
 	}
 }
 
+// At a terminal, a text secret shows without the control characters that
+// could steer it, and the command says that it held some.
+func TestTerminalShowsASecretWithoutControlCharacters(t *testing.T) {
+	srv := fakeServer(t)
+	link, _ := shareText(t, "--server="+srv.URL, "title\x1b]0;PWNED\x07 red\x1b[31m done", "--reusable")
+
+	c := startAtTerminal(t, "open", link)
+	c.expect("done")
+	c.expect("The secret holds control characters")
+	if code := c.exitCode(); code != 0 {
+		t.Fatalf("exit %d; the terminal shows:\n%s", code, c.screen())
+	}
+	if raw := c.raw(); strings.Contains(raw, "\x1b]0;PWNED") || strings.Contains(raw, "\x1b[31m done") {
+		t.Errorf("the secret's escape sequences reached the terminal: %q", raw)
+	}
+}
+
 // Ctrl-C at a question ends the command as interrupted, exit code 1, and
 // leaves the terminal as it found it, showing what is typed.
 func TestTerminalCtrlC(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -154,11 +153,7 @@ func (e *env) copySecret(text, what string) error {
 	copied := withoutFinalLineBreak(text)
 	if err := clipboard.Copy(copied); err != nil {
 		e.note("Couldn't copy to the clipboard (%v), so here it is:\n", err)
-		_, err := io.WriteString(e.stdout, text)
-		if err == nil && e.stdoutTTY && !strings.HasSuffix(text, "\n") {
-			_, err = fmt.Fprintln(e.stdout)
-		}
-		return err
+		return e.writeText([]byte(text))
 	}
 	if err := startClipboardClearer(clipHash(copied), clipboardClearAfter); err != nil {
 		e.note("Copied %s to the clipboard, but couldn't arrange for it to be cleared (%v); clear it yourself.\n", what, err)

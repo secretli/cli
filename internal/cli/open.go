@@ -41,7 +41,9 @@ func newOpenCmd(e *env) *cobra.Command {
 		Short: "Open a secret: text to stdout, files to disk",
 		Long: `Opens a link. Text is written to stdout exactly as it was shared; files are
 saved to the current directory, or to --out, and never overwrite anything
-unless --force is given.
+unless --force is given. At a terminal, control characters in the text, which
+could steer the terminal, are shown as a replacement character, and you are
+told; --copy, or stdout to a file or pipe, gives the exact text.
 
 Of a secret with several files, at a terminal, the files are listed and you
 are asked which to save: Enter saves them all, and numbers, ranges and
@@ -362,6 +364,27 @@ func (s *fileSink) File(f bundle.Entry) (io.WriteCloser, error) {
 	return file, nil
 }
 
+// writeText prints a text secret: into a pipe or a file exactly as it was
+// shared, and at a terminal without control characters, which could steer
+// it, saying so if there were any.
+func (e *env) writeText(text []byte) error {
+	if !e.stdoutTTY {
+		_, err := e.stdout.Write(text)
+		return err
+	}
+	shown, changed := printableText(text)
+	if _, err := io.WriteString(e.stdout, shown); err != nil {
+		return err
+	}
+	if shown != "" && !strings.HasSuffix(shown, "\n") {
+		_, _ = fmt.Fprintln(e.stdout)
+	}
+	if changed {
+		e.note("The secret holds control characters, shown as \uFFFD; --copy, or stdout to a file or pipe, gives the exact text.\n")
+	}
+	return nil
+}
+
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
@@ -396,13 +419,7 @@ func (e *env) printOpened(opened *share.Opened, sink *fileSink, copyText bool) e
 		if copyText {
 			return e.copySecret(string(sink.text), "the secret")
 		}
-		if _, err := e.stdout.Write(sink.text); err != nil {
-			return err
-		}
-		if e.stdoutTTY && len(sink.text) > 0 && sink.text[len(sink.text)-1] != '\n' {
-			_, _ = fmt.Fprintln(e.stdout)
-		}
-		return nil
+		return e.writeText(sink.text)
 	}
 	if sink.toStdout {
 		return nil
