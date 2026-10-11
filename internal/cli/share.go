@@ -67,7 +67,7 @@ short code instead of printing it, as secretli send does.`,
 	f.BoolVarP(&o.password, "password", "p", false, "protect the secret with a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVar(&o.qr, "qr", false, "show the link as a QR code too")
-	f.BoolVarP(&o.copyLink, "copy", "c", false, "copy the link to the clipboard")
+	f.BoolVarP(&o.copyLink, "copy", "c", false, "copy the link to the clipboard; cleared after 45 seconds")
 	f.BoolVar(&o.code, "code", false, "hand the link to another device with a short code instead of printing it")
 	return cmd
 }
@@ -228,10 +228,9 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 		}
 	}
 	if o.copyLink {
-		if err := clipboard.Copy(link); err != nil {
+		// The link is printed below anyway, so a failure needs no stand-in.
+		if err := e.copyAndClear(link, "the link"); err != nil {
 			e.note("Couldn't copy to the clipboard: %v\n", err)
-		} else {
-			e.note("Copied the link to the clipboard.\n")
 		}
 	}
 	if e.json {
