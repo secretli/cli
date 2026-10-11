@@ -380,7 +380,8 @@ func (e *env) writeText(text []byte) error {
 		_, _ = fmt.Fprintln(e.stdout)
 	}
 	if changed {
-		e.note("The secret holds control characters, shown as \uFFFD; --copy, or stdout to a file or pipe, gives the exact text.\n")
+		// Even with --quiet: what was printed is not quite the secret.
+		_, _ = fmt.Fprint(e.stderr, "The secret holds control characters, shown as \uFFFD; --copy, or stdout to a file or pipe, gives the exact text.\n")
 	}
 	return nil
 }
