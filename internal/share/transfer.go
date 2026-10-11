@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/secretli/cli/internal/share/api"
+	"github.com/secretli/format/go/link"
 	"github.com/secretli/format/go/transfer"
 )
 
@@ -28,24 +29,30 @@ var (
 )
 
 // Origin is a server's URL the way a browser writes its origin: scheme and
-// host in lower case, the default port left out. It is part of what both
-// sides of a transfer must agree on, so the CLI and the web app have to
-// spell it the same.
+// host in lower case, an IPv6 address in its canonical form, the default
+// port left out. It is part of what both sides of a transfer must agree on,
+// so the CLI and the web app have to spell it the same. It takes what people
+// type for --server, a path or a trailing slash included, and holds it to
+// the rule for links (FORMAT.md section 3): http is only for this machine.
 func Origin(server string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(server))
 	// url.Parse lower-cases the scheme already.
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return "", fmt.Errorf("not a server address: %q", server)
 	}
-	scheme := u.Scheme
-	host := strings.ToLower(u.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
+	// The link reader holds the one rule for origins: what it makes of a
+	// link to this server is the server's origin.
+	asLink := func(scheme string) (link.Link, error) {
+		return link.Parse(scheme + "://" + u.Host + "/s#" + strings.Repeat("A", 43))
 	}
-	if port := u.Port(); port != "" && (scheme != "https" || port != "443") && (scheme != "http" || port != "80") {
-		host += ":" + port
+	l, err := asLink(u.Scheme)
+	if err != nil {
+		if _, httpsErr := asLink("https"); u.Scheme == "http" && httpsErr == nil {
+			return "", fmt.Errorf("%s: http is only for this machine (localhost); use https", server)
+		}
+		return "", fmt.Errorf("not a server address: %q", server)
 	}
-	return scheme + "://" + host, nil
+	return l.Origin, nil
 }
 
 // SendWithCode opens a transfer for the link at the client's server and
@@ -108,7 +115,7 @@ func ReceiveWithCode(ctx context.Context, c *api.Client, code transfer.Code) (st
 		return "", err
 	}
 	relay := receiverRelay{relay{c: c, id: claimed.TransferID, token: claimed.ReceiverToken}}
-	sid, err := base64.RawURLEncoding.DecodeString(claimed.TransferID)
+	sid, err := api.DecodeValue(claimed.TransferID)
 	if err != nil || len(sid) != transfer.SIDSize {
 		relay.release(ctx)
 		return "", ErrBadTransfer

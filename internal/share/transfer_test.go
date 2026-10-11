@@ -23,12 +23,20 @@ func TestOriginIsSpelledLikeABrowser(t *testing.T) {
 		"http://localhost:8080":          "http://localhost:8080",
 		"http://LOCALHOST:80":            "http://localhost",
 		"http://[::1]:8080":              "http://[::1]:8080",
+		"http://127.0.0.1:5173":          "http://127.0.0.1:5173",
+		"https://[2001:DB8:0::1]:443":    "https://[2001:db8::1]",
+		"https://192.0.2.1/":             "https://192.0.2.1",
 	} {
 		if got, err := share.Origin(in); err != nil || got != want {
 			t.Errorf("Origin(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"", "secretli.app", "ftp://secretli.app"} {
+	for _, in := range []string{
+		"", "secretli.app", "ftp://secretli.app",
+		// http only for this machine, as for links.
+		"http://secretli.app", "http://192.168.1.2:8080", "http://[::ffff:127.0.0.1]",
+		"https://[fe80::1%25en0]", "https://secretli.app:99999",
+	} {
 		if got, err := share.Origin(in); err == nil {
 			t.Errorf("Origin(%q) = %q, want an error", in, got)
 		}

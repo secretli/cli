@@ -67,7 +67,7 @@ short code instead of printing it, as secretli send does.`,
 	f.BoolVarP(&o.password, "password", "p", false, "protect the secret with a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVar(&o.qr, "qr", false, "show the link as a QR code too")
-	f.BoolVarP(&o.copyLink, "copy", "c", false, "copy the link to the clipboard")
+	f.BoolVarP(&o.copyLink, "copy", "c", false, "copy the link to the clipboard; cleared after 45 seconds")
 	f.BoolVar(&o.code, "code", false, "hand the link to another device with a short code instead of printing it")
 	return cmd
 }
@@ -78,6 +78,12 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	}
 	if o.code && (o.qr || o.copyLink) {
 		return errors.New("--code hands the link over itself; leave out --qr and --copy")
+	}
+	// Before anything is read or uploaded: the link has to be one that
+	// opens, which rules out http to another machine.
+	server, err := share.Origin(e.server)
+	if err != nil {
+		return err
 	}
 	params := share.Params{Expiration: o.expires, Reusable: o.reusable}
 
@@ -148,7 +154,7 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 
 	bar := e.progress("Encrypting and uploading…")
 	params.Progress = bar.update
-	result, err := share.Share(ctx, e.client(e.server), params)
+	result, err := share.Share(ctx, e.client(server), params)
 	bar.finish()
 	if err != nil {
 		return err
@@ -228,10 +234,9 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 		}
 	}
 	if o.copyLink {
-		if err := clipboard.Copy(link); err != nil {
+		// The link is printed below anyway, so a failure needs no stand-in.
+		if err := e.copyAndClear(link, "the link"); err != nil {
 			e.note("Couldn't copy to the clipboard: %v\n", err)
-		} else {
-			e.note("Copied the link to the clipboard.\n")
 		}
 	}
 	if e.json {

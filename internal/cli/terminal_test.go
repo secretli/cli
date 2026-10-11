@@ -334,6 +334,41 @@ func TestTerminalShowsASecretWithoutControlCharacters(t *testing.T) {
 	}
 }
 
+// A link or a code typed at the prompt is a key, so it isn't shown: it
+// stays out of the scrollback, as a password does.
+func TestTerminalLinkAndCodeAreNotShown(t *testing.T) {
+	srv := fakeServer(t)
+	link, _ := shareText(t, "--server="+srv.URL, "the vault code\n", "--reusable")
+	_, key, _ := strings.Cut(link, "#")
+
+	c := startAtTerminal(t, "open")
+	c.expect("Paste the link (not shown): ")
+	c.typeSecret(link + "\r")
+	shown := c.expect("the vault code")
+	if code := c.exitCode(); code != 0 {
+		t.Fatalf("open: exit %d; the terminal shows:\n%s", code, c.screen())
+	}
+	if strings.Contains(shown, key) {
+		t.Errorf("the link shows:\n%s", c.screen())
+	}
+
+	sender := startCLI(t, "", "send", link)
+	transferCode := firstLine(t, sender)
+	c = startAtTerminal(t, "receive", "--server="+srv.URL)
+	c.expect("Code (not shown): ")
+	c.typeSecret(transferCode + "\r")
+	shown = c.expect("the vault code")
+	if code := c.exitCode(); code != 0 {
+		t.Fatalf("receive: exit %d; the terminal shows:\n%s", code, c.screen())
+	}
+	if code := exitOf(t, sender); code != 0 {
+		t.Errorf("send: exit %d, stderr %q", code, sender.stderr())
+	}
+	if strings.Contains(shown, transferCode) || strings.Contains(shown, strings.SplitN(transferCode, "-", 3)[1]) {
+		t.Errorf("the code shows:\n%s", c.screen())
+	}
+}
+
 // Ctrl-C at a question ends the command as interrupted, exit code 1, and
 // leaves the terminal as it found it, showing what is typed.
 func TestTerminalCtrlC(t *testing.T) {

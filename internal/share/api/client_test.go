@@ -207,3 +207,54 @@ func TestServerErrorsAreTriedAgain(t *testing.T) {
 		t.Errorf("asked %d times, %v", requests.Load(), err)
 	}
 }
+
+// The token headers stay with the server they were meant for: a redirect,
+// to the same host or another, is an error, and nothing follows it.
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	var reached atomic.Bool
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(elsewhere.Close)
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, elsewhere.URL+r.URL.Path, status)
+		}))
+		t.Cleanup(srv.Close)
+		_, err := api.New(srv.URL).Metadata(context.Background(), "id", "token")
+		if !api.IsStatus(err, status) || !strings.Contains(err.Error(), "redirect") {
+			t.Errorf("%d: err = %v, want the redirect as the error", status, err)
+		}
+	}
+	if reached.Load() {
+		t.Error("a redirect was followed")
+	}
+}
+
+// Bytes the server sends as text are read in the canonical form only.
+func TestTransferValuesMustBeCanonicalBase64URL(t *testing.T) {
+	claim := func(offer string) error {
+		body := fmt.Sprintf(`{"transfer_id":"id","receiver_token":"t","offer":%q,"expires_at":"2026-10-11T12:00:00Z"}`, offer)
+		_, err := answering(t, http.StatusOK, body).ClaimTransfer(context.Background(), 7)
+		return err
+	}
+	if err := claim("AAEC"); err != nil {
+		t.Fatalf("a canonical offer was refused: %v", err)
+	}
+	for _, offer := range []string{"AAEC=", "AAE\nC", "AA+C", "AA/C", "AAEC ", "AAF", "AAEDAQ="} {
+		if err := claim(offer); err == nil {
+			t.Errorf("offer %q was accepted", offer)
+		}
+	}
+	for in, want := range map[string]string{"": "", "AA": "\x00", "AAEC": "\x00\x01\x02"} {
+		if got, err := api.DecodeValue(in); err != nil || string(got) != want {
+			t.Errorf("DecodeValue(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"A", "AB", "AAF", "AA==", "A A=", "AA\n", "AA\r"} {
+		if got, err := api.DecodeValue(in); err == nil {
+			t.Errorf("DecodeValue(%q) = %q, want an error", in, got)
+		}
+	}
+}

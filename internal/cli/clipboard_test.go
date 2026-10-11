@@ -112,6 +112,28 @@ func TestOpenCopiesTheSecretInsteadOfPrintingIt(t *testing.T) {
 	}
 }
 
+// The link carries the key, so share --copy has it cleared like open --copy.
+func TestShareCopiesTheLinkAndClearsItLater(t *testing.T) {
+	srv := fakeServer(t)
+	cb := fakeClipboard(t)
+
+	stdout, stderr, code := runCLI(t, "the launch code", "share", "--server="+srv.URL, "--copy")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	link := strings.TrimSpace(stdout)
+	text, clearers := cb.state()
+	if text != link || !strings.Contains(link, "/s#") {
+		t.Errorf("clipboard = %q, link = %q", text, link)
+	}
+	if len(clearers) != 1 || clearers[0].hash != clipHash(link) || clearers[0].after != 45*time.Second {
+		t.Errorf("clearers = %+v", clearers)
+	}
+	if !strings.Contains(stderr, "Copied the link to the clipboard; it is cleared in 45 seconds.") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
 func TestCopyIsRefusedBeforeAnythingIsUsedUp(t *testing.T) {
 	srv := fakeServer(t)
 	server := "--server=" + srv.URL

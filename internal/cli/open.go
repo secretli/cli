@@ -60,8 +60,9 @@ cleared 45 seconds later, unless something else was copied by then.
 Opening a one-time secret is what uses it up, so the link is described first
 and you are asked before it is opened. --yes opens it without asking, and is
 needed where there is no terminal to ask on. Reusable secrets open right away.
-Without an argument the link is read from stdin, or asked for at a terminal,
-which keeps it out of your shell history.`,
+Without an argument the link is read from stdin, or asked for at a terminal
+without showing it, which keeps it out of your shell history and the
+scrollback.`,
 		Example: `  secretli open 'https://secretli.app/s#…'
   secretli open 'https://secretli.app/s#…' --out ./received
   secretli open 'https://secretli.app/s#…' --stdout > backup.tgz
@@ -219,7 +220,9 @@ func (e *env) linkArg(ctx context.Context, args []string) (share.Link, error) {
 			return share.Link{}, errors.New("no link given")
 		}
 		defer t.close()
-		if raw, err = t.askLine(ctx, "Paste the link: "); err != nil {
+		// The link is the key: like a password, it isn't shown, so that it
+		// stays out of the scrollback and any recording of the session.
+		if raw, err = t.askSecret(ctx, "Paste the link (not shown): "); err != nil {
 			return share.Link{}, err
 		}
 	}

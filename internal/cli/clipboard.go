@@ -150,12 +150,22 @@ func withoutFinalLineBreak(text string) string {
 // cleared again later. If copying fails, the text is printed after all: a
 // one-time secret is used up by now, and this is the only copy.
 func (e *env) copySecret(text, what string) error {
-	copied := withoutFinalLineBreak(text)
-	if err := clipboard.Copy(copied); err != nil {
+	if err := e.copyAndClear(withoutFinalLineBreak(text), what); err != nil {
 		e.note("Couldn't copy to the clipboard (%v), so here it is:\n", err)
 		return e.writeText([]byte(text))
 	}
-	if err := startClipboardClearer(clipHash(copied), clipboardClearAfter); err != nil {
+	return nil
+}
+
+// copyAndClear puts text on the clipboard and has it cleared again after
+// clipboardClearAfter, and says so. Whatever goes on the clipboard here
+// carries a key, so nothing is left there for good. If copying fails, the
+// caller decides what to do instead.
+func (e *env) copyAndClear(text, what string) error {
+	if err := clipboard.Copy(text); err != nil {
+		return err
+	}
+	if err := startClipboardClearer(clipHash(text), clipboardClearAfter); err != nil {
 		e.note("Copied %s to the clipboard, but couldn't arrange for it to be cleared (%v); clear it yourself.\n", what, err)
 		return nil
 	}
