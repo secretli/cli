@@ -29,7 +29,8 @@ works once and for ten minutes, and a wrong one ends the transfer. Given an
 owner link, only the link to hand out is sent; the owner link stays here.
 
 Prints the code and waits until the link was handed over. Without an
-argument the link is read from stdin, or asked for at a terminal.`,
+argument the link is read from stdin, or asked for at a terminal without
+showing it.`,
 		Example: `  secretli send 'https://secretli.app/s#…'
   secretli share notes.txt -q | secretli send`,
 		Args:              cobra.MaximumNArgs(1),
