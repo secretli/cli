@@ -345,3 +345,17 @@ func TestFormatting(t *testing.T) {
 		t.Errorf("safeName backslashes = %q", got)
 	}
 }
+
+// A link has to open, so share and receive refuse http to another machine
+// before anything is read, uploaded or claimed (FORMAT.md section 3).
+func TestHTTPIsOnlyForThisMachine(t *testing.T) {
+	for _, args := range [][]string{
+		{"share", "--server=http://192.0.2.1", "-t", "the launch code"},
+		{"receive", "--server=http://192.0.2.1", "--link", "7-acid-rocket"},
+	} {
+		_, stderr, code := runCLI(t, "", args...)
+		if code == 0 || !strings.Contains(stderr, "http is only for this machine") {
+			t.Errorf("%v: exit %d, stderr %q; want the address refused", args, code, stderr)
+		}
+	}
+}

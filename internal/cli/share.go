@@ -79,6 +79,12 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	if o.code && (o.qr || o.copyLink) {
 		return errors.New("--code hands the link over itself; leave out --qr and --copy")
 	}
+	// Before anything is read or uploaded: the link has to be one that
+	// opens, which rules out http to another machine.
+	server, err := share.Origin(e.server)
+	if err != nil {
+		return err
+	}
 	params := share.Params{Expiration: o.expires, Reusable: o.reusable}
 
 	var closers []io.Closer
@@ -148,7 +154,7 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 
 	bar := e.progress("Encrypting and uploading…")
 	params.Progress = bar.update
-	result, err := share.Share(ctx, e.client(e.server), params)
+	result, err := share.Share(ctx, e.client(server), params)
 	bar.finish()
 	if err != nil {
 		return err

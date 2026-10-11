@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,7 +73,7 @@ func (c *Client) ClaimTransfer(ctx context.Context, nameplate int) (*ClaimedTran
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/transfers/claim", jsonHeaders(""), payload, &body); err != nil {
 		return nil, err
 	}
-	offer, err := base64.RawURLEncoding.DecodeString(body.Offer)
+	offer, err := DecodeValue(body.Offer)
 	if err != nil {
 		return nil, fmt.Errorf("transfer offer: %w", err)
 	}
@@ -103,11 +104,11 @@ func (c *Client) AwaitTransferAnswer(ctx context.Context, transferID, token stri
 	if err != nil || !ok {
 		return nil, err
 	}
-	share, err := base64.RawURLEncoding.DecodeString(body.Share)
+	share, err := DecodeValue(body.Share)
 	if err != nil {
 		return nil, fmt.Errorf("answer share: %w", err)
 	}
-	confirmation, err := base64.RawURLEncoding.DecodeString(body.Confirmation)
+	confirmation, err := DecodeValue(body.Confirmation)
 	if err != nil {
 		return nil, fmt.Errorf("answer confirmation: %w", err)
 	}
@@ -134,7 +135,7 @@ func (c *Client) AwaitTransferDelivery(ctx context.Context, transferID, token st
 	if err != nil || !ok {
 		return nil, err
 	}
-	sealed, err := base64.RawURLEncoding.DecodeString(body.Sealed)
+	sealed, err := DecodeValue(body.Sealed)
 	if err != nil {
 		return nil, fmt.Errorf("sealed link: %w", err)
 	}
@@ -179,4 +180,18 @@ func jsonHeaders(token string) http.Header {
 
 func encodeValue(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// DecodeValue reads bytes the server sends as text: canonical unpadded
+// base64url only, as the format's readers accept it (FORMAT.md section 1).
+// encoding/base64 skips line breaks even in strict mode, so the alphabet is
+// checked first; Strict refuses bits set past the last byte.
+func DecodeValue(s string) ([]byte, error) {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_' {
+			return nil, errors.New("not base64url")
+		}
+	}
+	return base64.RawURLEncoding.Strict().DecodeString(s)
 }

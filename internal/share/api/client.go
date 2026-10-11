@@ -59,7 +59,19 @@ type Client struct {
 func New(baseURL string) *Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = ResponseHeaderTimeout
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTP: &http.Client{Transport: transport}, UserAgent: "secretli-cli"}
+	return &Client{
+		BaseURL:   strings.TrimRight(baseURL, "/"),
+		HTTP:      &http.Client{Transport: transport, CheckRedirect: refuseRedirects},
+		UserAgent: "secretli-cli",
+	}
+}
+
+// refuseRedirects keeps every request at the server it was meant for. Go
+// would send the token headers along to wherever a redirect points, another
+// host included. A Secretli server never redirects, so the redirect itself
+// comes back as the answer, and that is an error.
+func refuseRedirects(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 // Error is an answer the server gave that was not a success, or, with
@@ -359,6 +371,11 @@ func (c *Client) once(ctx context.Context, method, path string, headers http.Hea
 		apiErr.RequestID = id
 	} else {
 		apiErr.RequestID = requestID
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// Where it points is the server's text, and of no use: it isn't followed.
+		apiErr.Message = c.BaseURL + " answered with a redirect, which secretli does not follow"
+		return nil, apiErr
 	}
 	var payload struct {
 		Error   string         `json:"error"`

@@ -101,7 +101,7 @@ secretli status "$OWNER_LINK" --json | jq -r .state   # live or gone
 
 ## Your own server
 
-New secrets go to `https://secretli.app` unless `--server` or `SECRETLI_SERVER` names another Secretli server. Opening, checking, deleting and `send` need no setting, since every link carries its server. A code does not, so `receive` asks the same server as `share`: pass `--server` there too when the code comes from another one.
+New secrets go to `https://secretli.app` unless `--server` or `SECRETLI_SERVER` names another Secretli server. Opening, checking, deleting and `send` need no setting, since every link carries its server. A code does not, so `receive` asks the same server as `share`: pass `--server` there too when the code comes from another one. A server is reached over `https`; `http` works only for one on this machine (`localhost`), for development, and the same goes for links.
 
 ## Development
 
