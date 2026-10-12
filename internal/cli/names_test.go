@@ -157,7 +157,9 @@ func TestOneTimeSecretsNumberNamesThatExist(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "B.txt")); err != nil {
+	// The disk decides what counts as the same name, so this one matches in
+	// case too: Linux tells b.txt from B.txt, macOS and Windows don't.
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "b.txt")); err != nil {
 		t.Fatal(err)
 	}
 	if err := saveAll(t, &fileSink{dir: dir, oneTime: true}, []string{"a.txt", "b.txt", "a.txt", "c.txt"}); err != nil {
