@@ -124,8 +124,9 @@ func TestEveryFileGetsAPlace(t *testing.T) {
 	}
 }
 
-// Without --force nothing is replaced, a link that leads nowhere included,
-// and that is found out before anything is written.
+// Of a reusable secret, which can be opened again, nothing is replaced
+// without --force, a link that leads nowhere included, and that is found
+// out before anything is written.
 func TestExistingNamesAreRefusedFirst(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symbolic links need privileges on Windows")
@@ -140,6 +141,43 @@ func TestExistingNamesAreRefusedFirst(t *testing.T) {
 	}
 	if got := namesIn(t, dir); !reflect.DeepEqual(got, []string{"b.txt"}) {
 		t.Errorf("written before the refusal: %q", got)
+	}
+}
+
+// A one-time secret is used up once it is opened, so a name that exists
+// doesn't lose its file: it is saved under the next number free both in
+// the bundle and on disk, and what was there stays as it was.
+func TestOneTimeSecretsNumberNamesThatExist(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symbolic links need privileges on Windows")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"a.txt", "a (2).txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("there before"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "B.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveAll(t, &fileSink{dir: dir, oneTime: true}, []string{"a.txt", "b.txt", "a.txt", "c.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"a.txt":     "there before",
+		"a (2).txt": "there before",
+		"a (3).txt": "content of a.txt",
+		"a (4).txt": "content of a.txt",
+		"b (2).txt": "content of b.txt",
+		"c.txt":     "content of c.txt",
+	}
+	for name, content := range want {
+		if b, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(b) != content {
+			t.Errorf("%s holds %q, %v", name, b, err)
+		}
+	}
+	if got := len(namesIn(t, dir)); got != len(want)+1 {
+		t.Errorf("%d entries in the directory, want %d: %q", got, len(want)+1, namesIn(t, dir))
 	}
 }
 
@@ -219,6 +257,42 @@ func TestOpenSavesFilesOfTheSameName(t *testing.T) {
 		t.Fatalf("open: exit %d, stderr %q", code, stderr)
 	}
 	for name, want := range map[string]string{"notes.txt": "the first", "notes (2).txt": "the second"} {
+		if b, err := os.ReadFile(filepath.Join(out, name)); err != nil || string(b) != want {
+			t.Errorf("%s holds %q, %v", name, b, err)
+		}
+	}
+}
+
+// Opening a one-time secret into a directory that has its file already
+// saves it under a new number and says so; a reusable one is refused and
+// can be opened again.
+func TestOpenNumbersAFileThatExistsOnlyForAOneTimeSecret(t *testing.T) {
+	srv := fakeServer(t)
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "notes.txt"), []byte("the secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if err := os.WriteFile(filepath.Join(out, "notes.txt"), []byte("there before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI(t, "", "share", "--server="+srv.URL, "--reusable", filepath.Join(src, "notes.txt"))
+	if code != 0 {
+		t.Fatalf("share: exit %d, %q", code, stderr)
+	}
+	if _, stderr, code = runCLI(t, "", "open", strings.TrimSpace(stdout), "--yes", "--out", out); code == 0 || !strings.Contains(stderr, "notes.txt exists") {
+		t.Fatalf("open reusable: exit %d, stderr %q", code, stderr)
+	}
+
+	stdout, stderr, code = runCLI(t, "", "share", "--server="+srv.URL, filepath.Join(src, "notes.txt"))
+	if code != 0 {
+		t.Fatalf("share: exit %d, %q", code, stderr)
+	}
+	if _, stderr, code = runCLI(t, "", "open", strings.TrimSpace(stdout), "--yes", "--out", out); code != 0 || !strings.Contains(stderr, "notes.txt as notes (2).txt") {
+		t.Fatalf("open one-time: exit %d, stderr %q", code, stderr)
+	}
+	for name, want := range map[string]string{"notes.txt": "there before", "notes (2).txt": "the secret"} {
 		if b, err := os.ReadFile(filepath.Join(out, name)); err != nil || string(b) != want {
 			t.Errorf("%s holds %q, %v", name, b, err)
 		}
