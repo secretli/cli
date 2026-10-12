@@ -61,7 +61,7 @@ For shell completion without Homebrew, `secretli completion zsh --help` (or `bas
 pg_dump db | gzip | secretli share --name db.sql.gz
 ```
 
-Links open once and expire after a day unless you say otherwise: `-e` takes `5m`, `10m`, `15m`, `1h`, `4h`, `12h`, `1d`, `3d` or `7d`, and `--reusable` lets a link open again and again until it expires. `-p` asks for a password; `--password-file` and `SECRETLI_PASSWORD` provide one without asking. `--qr` also draws the link as a QR code, for a phone to scan off the screen, and `-c` copies it to the clipboard.
+Links open once and expire after a day unless you say otherwise: `-e` takes `5m`, `10m`, `15m`, `1h`, `4h`, `12h`, `1d`, `3d` or `7d`, and `--reusable` lets a link open again and again until it expires. `-p` asks for a password; `--password-file` and `SECRETLI_PASSWORD` provide one without asking. The server takes ten wrong passwords for a secret and deletes it at the tenth; `open` says after each wrong one how many are left, and at a terminal asks again. `--qr` also draws the link as a QR code, for a phone to scan off the screen, and `-c` copies it to the clipboard.
 
 Every share prints two links: the one to hand out, and the owner link, which can delete the secret and, for a reusable one, tells you whether it has been opened. Keep the owner link to yourself.
 
@@ -91,7 +91,7 @@ The exit code tells a script what happened:
 | 1 | an error |
 | 2 | wrong usage |
 | 3 | a password is needed, or it is wrong; a transfer code did not match |
-| 4 | the secret is gone or not found: opened, deleted, expired or no such link; a transfer code is unknown, used, expired or stopped |
+| 4 | the secret is gone or not found: opened, deleted, expired, deleted at the tenth wrong password, or no such link; a transfer code is unknown, used, expired or stopped |
 | 5 | the server could not be reached, did not answer within a minute, or is limiting requests |
 
 ```bash

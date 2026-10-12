@@ -160,11 +160,17 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		if err == nil {
 			return e.printOpened(opened, sink, o.copy)
 		}
-		// A mistyped password costs nothing: the server only hands out the
-		// secret once the right token arrives. Ask again at a terminal.
-		if errors.Is(err, share.ErrWrongPassword) && source.file == "" && os.Getenv("SECRETLI_PASSWORD") == "" && attempt < 3 {
+		// A mistyped password doesn't use the secret up, but the server
+		// counts it, and at the last one it takes deletes the secret. Ask
+		// again at a terminal, saying how many are left.
+		var wrong *share.WrongPasswordError
+		if errors.As(err, &wrong) && wrong.AttemptsLeft != 0 && source.file == "" && os.Getenv("SECRETLI_PASSWORD") == "" && attempt < 3 {
 			if t, terr := e.terminal(); terr == nil {
-				e.note("Wrong password. Try again.\n")
+				if left := wrong.Left(); left != "" {
+					e.note("Wrong password, %s. Try again.\n", left)
+				} else {
+					e.note("Wrong password. Try again.\n")
+				}
 				password, err = t.askSecret(ctx, "Password: ")
 				t.close()
 				if err == nil && password != "" {

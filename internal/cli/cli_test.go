@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -166,7 +167,7 @@ func TestJSONAndFilesAndPasswords(t *testing.T) {
 	}
 	t.Setenv("SECRETLI_PASSWORD", "wrong")
 	_, stderr, code = runCLI(t, "", "open", shared.Link)
-	if code != ExitPassword || !strings.Contains(stderr, "wrong password") {
+	if code != ExitPassword || !strings.Contains(stderr, "wrong password; 9 tries left before the secret is deleted") {
 		t.Errorf("open with wrong password: exit %d, stderr %q", code, stderr)
 	}
 	t.Setenv("SECRETLI_PASSWORD", "")
@@ -237,6 +238,42 @@ func TestJSONAndFilesAndPasswords(t *testing.T) {
 	status = nil
 	if err := json.Unmarshal([]byte(stdout), &status); err != nil || code != ExitGone || status["code"] != float64(ExitGone) || len(status) != 2 {
 		t.Errorf("open after delete: exit %d, %v, %q", code, err, stdout)
+	}
+}
+
+// Each wrong password says how many the secret still takes; the last one
+// deletes it, and the command says so with 4, the code for a gone secret.
+func TestTheLastWrongPasswordEndsWithGone(t *testing.T) {
+	srv := fakeServer(t)
+	t.Setenv("SECRETLI_PASSWORD", "hunter2")
+	stdout, stderr, code := runCLI(t, "", "share", "--server="+srv.URL, "--reusable", "-p", "-t", "guarded")
+	if code != 0 {
+		t.Fatalf("share: exit %d, stderr %q", code, stderr)
+	}
+	link := strings.TrimSpace(stdout)
+
+	t.Setenv("SECRETLI_PASSWORD", "wrong")
+	for left := 9; left > 1; left-- {
+		_, stderr, code = runCLI(t, "", "open", link)
+		if want := fmt.Sprintf("wrong password; %d tries left before the secret is deleted", left); code != ExitPassword || !strings.Contains(stderr, want) {
+			t.Fatalf("wrong password: exit %d, stderr %q, want %q", code, stderr, want)
+		}
+	}
+	if _, stderr, code = runCLI(t, "", "open", link); code != ExitPassword || !strings.Contains(stderr, "1 try left") {
+		t.Fatalf("second to last: exit %d, stderr %q", code, stderr)
+	}
+	stdout, _, code = runCLI(t, "", "open", link, "--json")
+	var failed struct {
+		Error string `json:"error"`
+		Code  int    `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &failed); err != nil || code != ExitGone || failed.Code != ExitGone || !strings.Contains(failed.Error, "the server deleted it") {
+		t.Fatalf("the last wrong password: exit %d, %v, %q", code, err, stdout)
+	}
+
+	t.Setenv("SECRETLI_PASSWORD", "hunter2")
+	if _, stderr, code = runCLI(t, "", "open", link); code != ExitGone || !strings.Contains(stderr, "gone") {
+		t.Errorf("the right password afterwards: exit %d, stderr %q", code, stderr)
 	}
 }
 

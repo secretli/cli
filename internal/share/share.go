@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +71,53 @@ type NotFoundError struct{}
 
 func (*NotFoundError) Error() string {
 	return "this secret is gone: it may have expired, been opened or been deleted"
+}
+
+// WrongPasswordError is a password the server's blob token did not match;
+// it is ErrWrongPassword. The server counts them per secret and deletes the
+// secret at the last one it takes.
+type WrongPasswordError struct {
+	// AttemptsLeft is how many more wrong passwords the secret takes: 0
+	// when this one deleted it, -1 when the server didn't say.
+	AttemptsLeft int
+}
+
+func (e *WrongPasswordError) Error() string {
+	switch {
+	case e.AttemptsLeft < 0:
+		return ErrWrongPassword.Error()
+	case e.AttemptsLeft == 0:
+		return "wrong password, and the last one this secret takes: the server deleted it"
+	}
+	return "wrong password; " + e.Left()
+}
+
+// Left says how many more wrong passwords the secret takes, as in "9 tries
+// left before the secret is deleted"; empty when the server didn't say.
+func (e *WrongPasswordError) Left() string {
+	switch {
+	case e.AttemptsLeft < 0:
+		return ""
+	case e.AttemptsLeft == 1:
+		return "1 try left before the secret is deleted"
+	}
+	return strconv.Itoa(e.AttemptsLeft) + " tries left before the secret is deleted"
+}
+
+func (e *WrongPasswordError) Is(target error) bool { return target == ErrWrongPassword }
+
+// wrongPassword is the error for a refused blob token on a secret with a
+// password, with the count the server sent along.
+func wrongPassword(err error) error {
+	left := -1
+	var apiErr *api.Error
+	if errors.As(err, &apiErr) {
+		// JSON numbers arrive as float64; anything else is no count.
+		if n, ok := apiErr.Details["attempts_left"].(float64); ok && n >= 0 && n <= 1000 && n == math.Trunc(n) {
+			left = int(n)
+		}
+	}
+	return &WrongPasswordError{AttemptsLeft: left}
 }
 
 // Link is a share link; ParseLink reads one as the web app prints it. Both
@@ -347,7 +396,7 @@ type Opened struct {
 
 // Open reads a secret, handing the content to sink. Opening a one-time
 // secret is what ends it. A password is needed when Info says so; a wrong
-// one is ErrWrongPassword. progress, if set, is told the plaintext bytes
+// one is a *WrongPasswordError, which is ErrWrongPassword. progress, if set, is told the plaintext bytes
 // written so far.
 func Open(ctx context.Context, c *api.Client, link Link, password string, sink Sink, progress func(done, total int64)) (*Opened, error) {
 	info, err := Inspect(ctx, c, link)
@@ -369,7 +418,7 @@ func Open(ctx context.Context, c *api.Client, link Link, password string, sink S
 	if err != nil {
 		switch {
 		case api.IsStatus(err, http.StatusForbidden) && info.PasswordProtected:
-			return nil, ErrWrongPassword
+			return nil, wrongPassword(err)
 		case api.IsStatus(err, http.StatusForbidden):
 			return nil, ErrLinkMismatch
 		case api.IsStatus(err, http.StatusNotFound):
