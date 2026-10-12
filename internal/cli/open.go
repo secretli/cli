@@ -327,9 +327,11 @@ func (s *fileSink) pick(ctx context.Context, t *terminal, files []bundle.Entry, 
 // prepare makes the output directory and settles where each of the
 // chosen files, nil meaning all, goes: under its name as diskName makes
 // it, numbered when another file of the bundle got that name first, so
-// that every one can be written. It checks that none of them exists, or
-// with --force that none is a directory, before anything is written: the
-// secret may be used up already, and a stop half-way would lose the rest.
+// that every one can be written. A name that exists on disk is refused for
+// a reusable secret, which can be opened again; a one-time secret is used
+// up by now, so its file takes the next number that is free instead. With
+// --force a file is replaced, but no directory. All of this is settled
+// before anything is written, since a stop half-way would lose the rest.
 func (s *fileSink) prepare(files []bundle.Entry, chosen []int) error {
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", s.dir, err)
@@ -344,27 +346,53 @@ func (s *fileSink) prepare(files []bundle.Entry, chosen []int) error {
 	// Names already given, in lower case: APFS and NTFS ignore case.
 	given := make(map[string]bool, len(chosen))
 	for _, i := range chosen {
-		name := diskName(files[i].Name)
-		for n := 2; given[strings.ToLower(name)]; n++ {
-			name = numbered(diskName(files[i].Name), n)
+		base := diskName(files[i].Name)
+		name, n := base, 2
+		for ; given[strings.ToLower(name)]; n++ {
+			name = numbered(base, n)
 		}
-		given[strings.ToLower(name)] = true
 		path := filepath.Join(s.dir, name)
-		// Lstat: a link counts as there, even one that leads nowhere.
 		info, err := os.Lstat(path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 		case err != nil:
 			return err
-		case !s.force:
+		case s.force:
+			if info.IsDir() {
+				return fmt.Errorf("%s is a directory; use --out for another directory", path)
+			}
+		case s.oneTime:
+			if path, err = s.freePath(base, n, given); err != nil {
+				return err
+			}
+		default:
 			return fmt.Errorf("%s exists; use --force to overwrite, or --out for another directory", path)
-		case info.IsDir():
-			return fmt.Errorf("%s is a directory; use --out for another directory", path)
 		}
+		given[strings.ToLower(filepath.Base(path))] = true
 		paths[files[i].Index] = path
 	}
 	s.paths = paths
 	return nil
+}
+
+// freePath is the first of base's numbered names, from n on, that no other
+// file of the bundle has and nothing on disk takes. Lstat: a link counts as
+// there, even one that leads nowhere.
+func (s *fileSink) freePath(base string, n int, given map[string]bool) (string, error) {
+	for ; ; n++ {
+		name := numbered(base, n)
+		if given[strings.ToLower(name)] {
+			continue
+		}
+		path := filepath.Join(s.dir, name)
+		_, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
 }
 
 func (s *fileSink) Text(text []byte) error {
