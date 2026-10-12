@@ -217,12 +217,16 @@ func exitCode(err error) int {
 		return ExitUsage
 	}
 	var notFound *share.NotFoundError
+	var wrong *share.WrongPasswordError
 	var ended *transfer.EndedError
 	var apiErr *api.Error
 	switch {
 	case errors.Is(err, context.Canceled):
 		// Ctrl-C, whatever was going on: at the password prompt, say.
 		return ExitError
+	case errors.As(err, &wrong) && wrong.AttemptsLeft == 0:
+		// The last wrong password the secret took: it is deleted now.
+		return ExitGone
 	case errors.Is(err, share.ErrPasswordRequired), errors.Is(err, share.ErrWrongPassword), errors.Is(err, transfer.ErrCodeMismatch):
 		return ExitPassword
 	case errors.As(err, &notFound), errors.As(err, &ended),

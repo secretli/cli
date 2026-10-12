@@ -62,7 +62,13 @@ type secret struct {
 	created  time.Time
 	consumed bool
 	opened   bool
+	// wrongBlobTokens counts the wrong blob tokens tried, as the server does.
+	wrongBlobTokens int
 }
+
+// maxWrongBlobTokens is how many wrong blob tokens a secret takes before
+// the server deletes it.
+const maxWrongBlobTokens = 10
 
 // New starts a fake server whose upload sessions hand out this part size.
 func New(partSize int64) *Server {
@@ -292,7 +298,12 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("X-Blob-Token") != sec.req.BlobToken {
-		writeError(w, 403, "invalid blob token", nil)
+		sec.wrongBlobTokens++
+		left := maxWrongBlobTokens - sec.wrongBlobTokens
+		if left == 0 {
+			delete(s.secrets, id)
+		}
+		writeError(w, 403, "invalid blob token", map[string]any{"attempts_left": left})
 		return
 	}
 	// The owner's own look at a reusable secret is not an opening. A one-time

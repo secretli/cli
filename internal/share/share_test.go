@@ -137,8 +137,9 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	if _, err := share.Open(ctx, c, recipient, "", &memorySink{}, nil); !errors.Is(err, share.ErrPasswordRequired) {
 		t.Errorf("no password: err = %v", err)
 	}
-	if _, err := share.Open(ctx, c, recipient, "wrong", &memorySink{}, nil); !errors.Is(err, share.ErrWrongPassword) {
-		t.Errorf("wrong password: err = %v", err)
+	_, err = share.Open(ctx, c, recipient, "wrong", &memorySink{}, nil)
+	if wrong, ok := errors.AsType[*share.WrongPasswordError](err); !ok || !errors.Is(err, share.ErrWrongPassword) || wrong.AttemptsLeft != 9 {
+		t.Errorf("wrong password: err = %v, want a WrongPasswordError with 9 left", err)
 	}
 
 	sink := &memorySink{}
@@ -328,6 +329,29 @@ func TestDeleteNeedsTheOwnerLinkAndLeavesNothing(t *testing.T) {
 	}
 	if err := share.Delete(ctx, c, result.Link); !errors.As(err, &notFound) {
 		t.Errorf("second delete: err = %v, want a NotFoundError", err)
+	}
+}
+
+// The server counts wrong passwords and deletes the secret at the tenth;
+// each one says how many are left, and the secret is gone after the last.
+func TestTheLastWrongPasswordDeletesTheSecret(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newClient(t, 32*1024*1024)
+	result, err := share.Share(ctx, c, share.Params{Text: []byte("guarded"), Password: "hunter2", Reusable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient := result.Link.Recipient()
+	for want := 9; want >= 0; want-- {
+		_, err := share.Open(ctx, c, recipient, "wrong", &memorySink{}, nil)
+		wrong, ok := errors.AsType[*share.WrongPasswordError](err)
+		if !ok || wrong.AttemptsLeft != want {
+			t.Fatalf("wrong password: err = %v, want %d left", err, want)
+		}
+	}
+	var notFound *share.NotFoundError
+	if _, err := share.Open(ctx, c, recipient, "hunter2", &memorySink{}, nil); !errors.As(err, &notFound) {
+		t.Errorf("the right password after the last wrong one: err = %v, want a NotFoundError", err)
 	}
 }
 
