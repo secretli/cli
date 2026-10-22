@@ -1,5 +1,6 @@
 // Package cli is the secretli command: share, open, status and delete, and
-// send and receive for handing a link over with a short code.
+// send and receive for handing a link over with a short code, and mcp,
+// which offers the same to AI assistants.
 //
 // stdout carries the result and nothing else, so `secretli share … | pbcopy`
 // copies exactly the link; everything said to the person goes to stderr.
@@ -122,7 +123,8 @@ Links from this command open in the web app and the other way round.`,
   secretli status <link>               what a link points to, without opening it
   secretli delete <owner-link>         remove a secret for everyone
   secretli send <link>                 hand a link to another device with a short code
-  secretli receive 7-acid-rocket       open what another device sends with a code`,
+  secretli receive 7-acid-rocket       open what another device sends with a code
+  secretli mcp                         let an AI assistant send with a code`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version(),
@@ -141,7 +143,7 @@ Links from this command open in the web app and the other way round.`,
 	root.PersistentFlags().BoolVarP(&e.quiet, "quiet", "q", false, "print only the result")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return err })
 
-	root.AddCommand(newShareCmd(e), newOpenCmd(e), newStatusCmd(e), newDeleteCmd(e), newSendCmd(e), newReceiveCmd(e), newClearClipboardCmd())
+	root.AddCommand(newShareCmd(e), newOpenCmd(e), newStatusCmd(e), newDeleteCmd(e), newSendCmd(e), newReceiveCmd(e), newMCPCmd(e), newClearClipboardCmd())
 	return root
 }
 

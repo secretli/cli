@@ -13,6 +13,7 @@ secretli status <link>                # what a link points to, without opening i
 secretli delete <owner-link>          # remove a secret for everyone
 secretli send <link>                  # hand a link to another device with a code like 7-acid-rocket
 secretli receive 7-acid-rocket        # open what another device sends with a code
+secretli mcp                          # let an AI assistant send with a code (MCP)
 ```
 
 ## Install
@@ -98,6 +99,24 @@ The exit code tells a script what happened:
 link=$(printf '%s' "$DB_PASSWORD" | secretli share -e 1h -q)
 secretli status "$OWNER_LINK" --json | jq -r .state   # live or gone
 ```
+
+## AI assistants
+
+`secretli mcp` lets an assistant hand files or text to your other device with a code, so you can ask Claude to "send that to my laptop" and type the code there. It speaks the [Model Context Protocol](https://modelcontextprotocol.io) on stdin and stdout; the assistant starts it. For Claude Desktop, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "secretli": { "command": "secretli", "args": ["mcp"] }
+  }
+}
+```
+
+For Claude Code: `claude mcp add secretli -- secretli mcp`. A server other than secretli.app goes in `"env": {"SECRETLI_SERVER": "…"}`, or after `--server`.
+
+It offers two tools. `send` takes absolute file paths or text, encrypts and uploads them here like `share --code`, and returns the code and how to use it; the transfer then waits in the background. `transfer_status` says whether the code was used: `waiting`, `delivered`, `failed` with the reason, or `unknown`, and can wait up to 30 seconds for it. The assistant never gets a link: the result holds the code, the expiry, the file names and the size, nothing that opens the secret. Secrets made this way open once and expire after a day, or after `expires`. Transfers still waiting end when the assistant closes the connection, so the other device isn't left waiting.
+
+The assistant decides which files to send, so let your client ask before it calls `send`.
 
 ## Your own server
 
