@@ -134,6 +134,67 @@ func TestShareCopiesTheLinkAndClearsItLater(t *testing.T) {
 	}
 }
 
+// --paste shares the clipboard's text, and with --copy the link takes its
+// place there: what open --copy gives back is what was pasted.
+func TestSharePastesTheClipboard(t *testing.T) {
+	srv := fakeServer(t)
+	server := "--server=" + srv.URL
+	cb := fakeClipboard(t)
+
+	// The paste tool's own line break is not part of the secret.
+	cb.text, cb.pasteSuffix = "hunter2", "\r\n"
+	stdout, stderr, code := runCLI(t, "ignored", "share", server, "--paste", "--copy")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	link := strings.TrimSpace(stdout)
+	cb.pasteSuffix = ""
+	if text, _ := cb.state(); text != link {
+		t.Errorf("clipboard = %q, want the link %q", text, link)
+	}
+	if stdout, _, code := runCLI(t, "", "open", link, "--yes"); code != 0 || stdout != "hunter2" {
+		t.Errorf("open: exit %d, stdout %q", code, stdout)
+	}
+
+	// With --name, the clipboard is shared as a file.
+	cb.text = "A=1\nB=2\n"
+	link, _ = shareText(t, server, "", "--paste", "--name", ".env")
+	dir := t.TempDir()
+	if _, stderr, code := runCLI(t, "", "open", link, "--yes", "--out", dir); code != 0 {
+		t.Fatalf("open file: exit %d, stderr %q", code, stderr)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, ".env")); err != nil || string(data) != "A=1\nB=2" {
+		t.Errorf(".env = %q, %v", data, err)
+	}
+}
+
+func TestPasteIsRefusedBeforeAnythingIsUploaded(t *testing.T) {
+	srv := fakeServer(t)
+	server := "--server=" + srv.URL
+	cb := fakeClipboard(t)
+	file := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(file, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cb.text = "x"
+	for _, args := range [][]string{{"-t", "y"}, {file}, {"-"}} {
+		if _, stderr, code := runCLI(t, "", append([]string{"share", server, "--paste"}, args...)...); code != ExitError || !strings.Contains(stderr, "--paste shares the clipboard; leave out --text and files") {
+			t.Errorf("%v: exit %d, stderr %q", args, code, stderr)
+		}
+	}
+
+	cb.text = "\n"
+	if _, stderr, code := runCLI(t, "", "share", server, "--paste"); code != ExitError || !strings.Contains(stderr, "--paste: the clipboard holds no text") {
+		t.Errorf("empty clipboard: exit %d, stderr %q", code, stderr)
+	}
+
+	clipboard = noClipboard{}
+	if _, stderr, code := runCLI(t, "", "share", server, "--paste"); code != ExitError || !strings.Contains(stderr, "--paste: no clipboard tool found") {
+		t.Errorf("no clipboard: exit %d, stderr %q", code, stderr)
+	}
+}
+
 func TestCopyIsRefusedBeforeAnythingIsUsedUp(t *testing.T) {
 	srv := fakeServer(t)
 	server := "--server=" + srv.URL

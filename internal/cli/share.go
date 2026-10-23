@@ -27,6 +27,7 @@ type shareOptions struct {
 	password     bool
 	qr           bool
 	copyLink     bool
+	paste        bool
 	code         bool
 }
 
@@ -39,15 +40,17 @@ func newShareCmd(e *env) *cobra.Command {
 to hand out, and the owner link, which can delete the secret and, for a
 reusable one, tell whether it has been opened.
 
-Files are given as arguments. Text comes from stdin, from --text, or, at a
-terminal, from a prompt, which keeps it out of your shell history. "-" shares
-stdin as a file named by --name.
+Files are given as arguments. Text comes from stdin, from --text, from the
+clipboard with --paste, or, at a terminal, from a prompt, which keeps it out
+of your shell history. "-" shares stdin as a file named by --name, and --name
+with --paste shares the clipboard as a file.
 
 Links open once unless --reusable is set, and expire after a day unless
 --expires says otherwise. --code hands the link to another device with a
 short code instead of printing it, as secretli send does.`,
 		Example: `  secretli share                          type or paste, then Ctrl-D
   pbpaste | secretli share                text from a pipe
+  secretli share --paste -c               the clipboard's text in, the link out
   secretli share -t "hunter2"             text as an argument (lands in shell history)
   secretli share deploy.key notes.pdf     files
   pg_dump db | gzip | secretli share --name db.sql.gz
@@ -68,6 +71,7 @@ short code instead of printing it, as secretli send does.`,
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVar(&o.qr, "qr", false, "show the link as a QR code too")
 	f.BoolVarP(&o.copyLink, "copy", "c", false, "copy the link to the clipboard; cleared after 45 seconds")
+	f.BoolVar(&o.paste, "paste", false, "share the clipboard's text, without its final line break")
 	f.BoolVar(&o.code, "code", false, "hand the link to another device with a short code instead of printing it")
 	return cmd
 }
@@ -84,6 +88,9 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	server, err := share.Origin(e.server)
 	if err != nil {
 		return err
+	}
+	if o.paste && (o.text != "" || len(args) > 0) {
+		return errors.New("--paste shares the clipboard; leave out --text and files")
 	}
 	params := share.Params{Expiration: o.expires, Reusable: o.reusable}
 
@@ -120,6 +127,16 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 		switch {
 		case o.text != "":
 			params.Text = []byte(o.text)
+		case o.paste:
+			data, err := pasteSecret()
+			if err != nil {
+				return err
+			}
+			if o.name != "" {
+				params.Files = []bundle.Source{memorySource(o.name, data)}
+			} else {
+				params.Text = data
+			}
 		case o.name != "":
 			data, err := e.readStdin(ctx)
 			if err != nil {
@@ -193,6 +210,21 @@ func (e *env) readStdin(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("read stdin: %w", err)
 	}
 	return data, nil
+}
+
+// pasteSecret reads the clipboard for --paste. It drops one final line
+// break, which a paste tool may add of its own and open --copy leaves off,
+// so that what --paste shares, open --copy gives back.
+func pasteSecret() ([]byte, error) {
+	text, err := clipboard.Paste()
+	if err != nil {
+		return nil, fmt.Errorf("--paste: %w", err)
+	}
+	text = withoutFinalLineBreak(text)
+	if text == "" {
+		return nil, errors.New("--paste: the clipboard holds no text")
+	}
+	return []byte(text), nil
 }
 
 func memorySource(name string, data []byte) bundle.Source {
