@@ -7,8 +7,9 @@ It speaks the same format as the web app, so links work in both directions: a li
 ```bash
 secretli share                        # type or paste the secret, then Ctrl-D
 pbpaste | secretli share -e 1h        # text from a pipe, gone after an hour
+secretli share --paste -c             # the clipboard's text in, the link back on the clipboard
 secretli share deploy.key notes.pdf   # files; -p adds a password, --reusable lets it open more than once
-secretli open <link>                  # text to stdout, files to the current directory
+secretli open <link>                  # text to stdout, files to the current directory; -c copies text instead
 secretli status <link>                # what a link points to, without opening it
 secretli delete <owner-link>          # remove a secret for everyone
 secretli send <link>                  # hand a link to another device with a code like 7-acid-rocket
@@ -55,7 +56,7 @@ For shell completion without Homebrew, `secretli completion zsh --help` (or `bas
 
 ## Use
 
-**Sharing.** Files are arguments; text comes from a pipe, from a prompt when you are at a terminal, or from `-t`. The prompt and the pipe keep the secret out of your shell history; `-t` does not. `-` shares stdin as a file named by `--name`:
+**Sharing.** Files are arguments; text comes from a pipe, from a prompt when you are at a terminal, from the clipboard with `--paste`, or from `-t`. The prompt, the pipe and the clipboard keep the secret out of your shell history; `-t` does not. `--paste` leaves off the clipboard's final line break, as `open --copy` does, and with `--name` shares the clipboard as a file; it works with the same clipboard tools as `--copy`. `-` shares stdin as a file named by `--name`:
 
 ```bash
 pg_dump db | gzip | secretli share --name db.sql.gz
