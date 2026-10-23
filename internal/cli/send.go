@@ -80,11 +80,7 @@ func (e *env) printCode(code transfer.Code, expiresAt time.Time, origin string, 
 		_ = e.emitJSON(out)
 		return
 	}
-	receive := "secretli receive " + code.String()
-	if origin != DefaultServer {
-		receive += " --server " + origin
-	}
-	page := strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://") + "/c"
+	page, receive := receiveWays(code, origin)
 	waiting := fmt.Sprintf("Waiting for the other device. The code expires %s; Ctrl-C stops.", formatMoment(expiresAt, time.Now()))
 	if e.quiet || !e.stdoutTTY {
 		_, _ = fmt.Fprintln(e.stdout, code.String())
@@ -92,6 +88,17 @@ func (e *env) printCode(code transfer.Code, expiresAt time.Time, origin string, 
 		return
 	}
 	_, _ = fmt.Fprintf(e.stdout, "On the other device, open %s and type\n\n  %s\n\nor run %s there.\n%s\n", page, code, receive, waiting)
+}
+
+// receiveWays says where the other device takes a code: the server's /c
+// page, or the command for it.
+func receiveWays(code transfer.Code, origin string) (page, command string) {
+	command = "secretli receive " + code.String()
+	if origin != DefaultServer {
+		command += " --server " + origin
+	}
+	page = strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://") + "/c"
+	return page, command
 }
 
 // explained is an error told in the CLI's words, which keeps the original
