@@ -3,7 +3,7 @@ package sharetest
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -105,7 +105,7 @@ func (rl *relay) open(w http.ResponseWriter, r *http.Request) {
 		TransferID string `json:"transfer_id"`
 		Offer      string `json:"offer"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", nil)
 		return
 	}
@@ -145,7 +145,7 @@ func (rl *relay) claim(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Nameplate int `json:"nameplate"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Nameplate < 1 || req.Nameplate > maxNameplate {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil || req.Nameplate < 1 || req.Nameplate > maxNameplate {
 		writeError(w, http.StatusBadRequest, "invalid nameplate", nil)
 		return
 	}
@@ -200,7 +200,7 @@ func (rl *relay) postAnswer(w http.ResponseWriter, r *http.Request) {
 		Share        string `json:"share"`
 		Confirmation string `json:"confirmation"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", nil)
 		return
 	}
@@ -234,7 +234,7 @@ func (rl *relay) postDelivery(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Sealed string `json:"sealed"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", nil)
 		return
 	}

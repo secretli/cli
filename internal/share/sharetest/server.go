@@ -11,7 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -161,7 +161,7 @@ func sha256Hex(b []byte) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.MarshalWrite(w, v)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string, details map[string]any) {
@@ -174,7 +174,7 @@ func writeError(w http.ResponseWriter, status int, msg string, details map[strin
 
 func (s *Server) startUpload(w http.ResponseWriter, r *http.Request) {
 	var req uploadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BlobSize <= 0 {
+	if err := json.UnmarshalRead(r.Body, &req); err != nil || req.BlobSize <= 0 {
 		writeError(w, 400, "invalid request body", nil)
 		return
 	}
