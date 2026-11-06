@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -160,7 +160,7 @@ func (c *Client) longPoll(ctx context.Context, path, token string, out any) (boo
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return false, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.UnmarshalRead(resp.Body, out); err != nil {
 		return false, &Error{Status: resp.StatusCode, Message: "unreadable answer: " + err.Error(), RequestID: resp.Header.Get(headerRequestID)}
 	}
 	return true, nil

@@ -10,7 +10,8 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -187,9 +188,8 @@ func (e *env) note(format string, args ...any) {
 }
 
 func (e *env) emitJSON(v any) error {
-	enc := json.NewEncoder(e.stdout)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(v)
+	// One value on one line, keys sorted so that the output is stable.
+	return json.MarshalEncode(jsontext.NewEncoder(e.stdout), v, json.Deterministic(true))
 }
 
 // report prints an error and picks its exit code.

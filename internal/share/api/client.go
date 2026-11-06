@@ -8,7 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -298,7 +298,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, headers http.H
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.UnmarshalRead(resp.Body, out); err != nil {
 		return &Error{Status: resp.StatusCode, Message: "unreadable answer: " + err.Error(), RequestID: resp.Header.Get(headerRequestID)}
 	}
 	return nil
@@ -381,7 +381,7 @@ func (c *Client) once(ctx context.Context, method, path string, headers http.Hea
 		Error   string         `json:"error"`
 		Details map[string]any `json:"details"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&payload); err == nil {
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, 64*1024), &payload); err == nil {
 		if payload.Error != "" {
 			apiErr.Message = payload.Error
 		}
