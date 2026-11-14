@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/secretli/cli/internal/share"
 )
 
 func TestFormatSpeed(t *testing.T) {
@@ -94,4 +97,68 @@ type lineRecorder struct{ last string }
 func (l *lineRecorder) Write(b []byte) (int, error) {
 	l.last = string(b)
 	return len(b), nil
+}
+
+func TestStageBar(t *testing.T) {
+	cases := []struct {
+		sent, encrypted int64
+		want            string
+	}{
+		{0, 0, "░░░░░░░░░░"},
+		{0, 50, "▓▓▓▓▓░░░░░"},
+		{20, 50, "██▓▓▓░░░░░"},
+		// A cell is sent only once all of it is.
+		{99, 100, "█████████▓"},
+		{100, 100, "██████████"},
+	}
+	for _, tc := range cases {
+		got := stageBar(share.UploadProgress{Total: 100, Encrypted: tc.encrypted, Sent: tc.sent}, 10)
+		if got != tc.want {
+			t.Errorf("sent %d, encrypted %d: %q, want %q", tc.sent, tc.encrypted, got, tc.want)
+		}
+	}
+}
+
+func TestUploadLine(t *testing.T) {
+	const mb = 1 << 20
+	var line lineRecorder
+	p := &progressBar{w: &line, label: "Uploading"}
+	// Two seconds in, 64 MiB sent: 32 MiB a second.
+	p.samples = []progressSample{{at: time.Now().Add(-2 * time.Second)}}
+	u := share.UploadProgress{Total: 256 * mb, Encrypted: 128 * mb, Sent: 64 * mb, Uploaded: 32 * mb}
+	p.stages(u)
+	if want := "\r\033[KUploading █████▓▓▓▓▓░░░░░░░░░░ 25% · 64.0 MB of 256.0 MB · 32.0 MB/s · 6 s left"; line.last != want {
+		t.Errorf("line %q,\nwant %q", line.last, want)
+	}
+	// A retry shows at once, in place of the speed.
+	u.Retrying = true
+	p.stages(u)
+	if !strings.HasSuffix(line.last, "· a part didn't go through, trying it again…") {
+		t.Errorf("retry line %q", line.last)
+	}
+	// A narrow terminal loses the speed first, then the bar.
+	u.Retrying = false
+	p.width, p.last = 60, time.Time{}
+	p.stages(u)
+	if want := "\r\033[KUploading █████▓▓▓▓▓░░░░░░░░░░ 25% · 64.0 MB of 256.0 MB"; line.last != want {
+		t.Errorf("narrow line %q,\nwant %q", line.last, want)
+	}
+	p.width, p.last = 40, time.Time{}
+	p.stages(u)
+	if want := "\r\033[KUploading 25% · 64.0 MB of 256.0 MB"; line.last != want {
+		t.Errorf("narrower line %q,\nwant %q", line.last, want)
+	}
+}
+
+// A part sent again makes the count go back; the speed starts over then,
+// rather than going negative.
+func TestProgressRateStartsOverWhenTheCountGoesBack(t *testing.T) {
+	start := time.Now()
+	p := &progressBar{}
+	p.sample(0, start)
+	p.sample(10<<20, start.Add(time.Second))
+	p.sample(2<<20, start.Add(2*time.Second))
+	if len(p.samples) != 1 {
+		t.Errorf("%d samples after going back, want 1", len(p.samples))
+	}
 }

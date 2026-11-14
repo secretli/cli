@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/secretli/cli/internal/share"
 	qrcode "github.com/skip2/go-qrcode"
 	"golang.org/x/term"
 )
@@ -34,8 +35,9 @@ type progressBar struct {
 	// and a wrapped line can't be redrawn in place.
 	width int
 
-	last  time.Time
-	shown bool
+	last     time.Time
+	shown    bool
+	retrying bool
 
 	// samples are how far the transfer was at times at least
 	// sampleInterval apart, over the last rateWindow and one from before.
@@ -101,9 +103,69 @@ func (p *progressBar) update(done, total int64) {
 	_, _ = fmt.Fprintf(p.w, "\r\033[K%s", line)
 }
 
+// stageCells is how wide the upload's bar is.
+const stageCells = 20
+
+// stages draws an upload: a bar in three parts that always add up to the
+// bundle, sent (█), encrypted and ready to send (▓), still to read (░),
+// then how far along, and the speed and time left, or what it waits for.
+// On a narrow terminal the speed goes first, then the bar.
+func (p *progressBar) stages(u share.UploadProgress) {
+	if p == nil || u.Total < progressThreshold {
+		return
+	}
+	now := time.Now()
+	p.sample(u.Sent, now)
+	// Starting or ending a retry shows at once; the rest of the time, the
+	// line redraws at most ten times a second.
+	if u.Uploaded < u.Total && u.Retrying == p.retrying && now.Sub(p.last) < 100*time.Millisecond {
+		return
+	}
+	p.last, p.shown, p.retrying = now, true, u.Retrying
+
+	percent := u.Sent * 100 / u.Total
+	amounts := fmt.Sprintf("%d%% · %s of %s", percent, formatSize(u.Sent), formatSize(u.Total))
+	var tail string
+	switch {
+	case u.Retrying:
+		tail = "a part didn't go through, trying it again…"
+	case u.Sent >= u.Total:
+		tail = "waiting for the server to confirm…"
+	default:
+		if rate, over, moved := p.rate(); over >= rateAfter || moved >= rateAfterBytes {
+			tail = formatSpeed(rate, u.Total-u.Sent)
+		}
+	}
+	withBar := p.label + " " + stageBar(u, stageCells) + " " + amounts
+	lines := []string{withBar, p.label + " " + amounts}
+	if tail != "" {
+		lines = []string{withBar + " · " + tail, withBar, p.label + " " + amounts}
+	}
+	line := lines[len(lines)-1]
+	for _, candidate := range lines {
+		if p.width <= 0 || utf8.RuneCountInString(candidate) < p.width {
+			line = candidate
+			break
+		}
+	}
+	_, _ = fmt.Fprintf(p.w, "\r\033[K%s", line)
+}
+
+// stageBar is the upload as cells: sent, then encrypted and ready to send,
+// then still to read. A part only counts as full once all of it is there.
+func stageBar(u share.UploadProgress, cells int) string {
+	sent := int(u.Sent * int64(cells) / u.Total)
+	encrypted := max(int(u.Encrypted*int64(cells)/u.Total), sent)
+	return strings.Repeat("█", sent) + strings.Repeat("▓", encrypted-sent) + strings.Repeat("░", cells-encrypted)
+}
+
 // sample notes how far the transfer is, and forgets what is too old to
 // count.
 func (p *progressBar) sample(done int64, now time.Time) {
+	if n := len(p.samples); n > 0 && done < p.samples[n-1].done {
+		// The count went back, as when a part is sent again: start over.
+		p.samples = p.samples[:0]
+	}
 	if n := len(p.samples); n > 0 && now.Sub(p.samples[n-1].at) < sampleInterval {
 		return
 	}

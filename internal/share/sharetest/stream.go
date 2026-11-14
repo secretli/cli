@@ -56,7 +56,7 @@ func shareBlob(t testing.TB, origin, kind string, reusable bool, base *keys.KeyS
 	if int64(len(blob)) > session.PartSize {
 		t.Fatalf("a bundle of %d bytes needs more than one part", len(blob))
 	}
-	if err := c.UploadPart(ctx, session.ID, session.Token, 1, 0, blob, bundle.SHA256Hex(blob)); err != nil {
+	if err := c.UploadPart(ctx, session.ID, session.Token, 1, 0, blob, bundle.SHA256Hex(blob), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.CompleteUpload(ctx, session.ID, session.Token); err != nil {

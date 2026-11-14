@@ -179,7 +179,7 @@ func (c *Client) ReadRange(ctx context.Context, publicID, sessionToken string, s
 		"Authorization": {"Bearer " + sessionToken},
 		"Range":         {fmt.Sprintf("bytes=%d-%d", start, end)},
 	}
-	resp, err := c.do(ctx, http.MethodGet, "/api/v1/secrets/"+publicID+"/blob", headers, nil, 0)
+	resp, err := c.do(ctx, http.MethodGet, "/api/v1/secrets/"+publicID+"/blob", headers, nil, 0, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,16 @@ func (c *Client) StartUpload(ctx context.Context, req UploadRequest) (*UploadSes
 
 // UploadPart sends one part of the bundle. Parts are numbered from 1 and
 // every part but the last must be at least 5 MiB.
-func (c *Client) UploadPart(ctx context.Context, sessionID, token string, partNumber int, offset int64, data []byte, sha256Hex string) error {
+// PartProgress hears how a part upload goes, if set. Sent is told how many
+// bytes of the current attempt have gone out; Retrying, that an attempt
+// failed and another will follow, whose bytes count from zero again.
+type PartProgress struct {
+	Sent     func(n int64)
+	Retrying func()
+}
+
+// UploadPart sends one part of an upload, retrying transient failures.
+func (c *Client) UploadPart(ctx context.Context, sessionID, token string, partNumber int, offset int64, data []byte, sha256Hex string, progress *PartProgress) error {
 	headers := http.Header{
 		"Authorization":  {"Bearer " + token},
 		"Content-Type":   {"application/octet-stream"},
@@ -261,7 +270,12 @@ func (c *Client) UploadPart(ctx context.Context, sessionID, token string, partNu
 		headerPartSHA256: {sha256Hex},
 	}
 	path := fmt.Sprintf("/api/v1/secrets/uploads/%s/parts/%d", sessionID, partNumber)
-	return c.doJSON(ctx, http.MethodPut, path, headers, data, nil)
+	resp, err := c.do(ctx, http.MethodPut, path, headers, data, int64(len(data)), progress)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.Body.Close()
 }
 
 // CompleteUpload turns the uploaded parts into the secret and returns its
@@ -289,7 +303,7 @@ func (c *Client) AbortUpload(ctx context.Context, sessionID, token string) error
 
 // doJSON performs a request and decodes a JSON answer into out, if out is set.
 func (c *Client) doJSON(ctx context.Context, method, path string, headers http.Header, body []byte, out any) error {
-	resp, err := c.do(ctx, method, path, headers, body, int64(len(body)))
+	resp, err := c.do(ctx, method, path, headers, body, int64(len(body)), nil)
 	if err != nil {
 		return err
 	}
@@ -306,13 +320,13 @@ func (c *Client) doJSON(ctx context.Context, method, path string, headers http.H
 
 // do sends the request, retrying transient failures, and returns a response
 // with a 2xx status; anything else becomes an *Error.
-func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body []byte, contentLength int64) (*http.Response, error) {
+func (c *Client) do(ctx context.Context, method, path string, headers http.Header, body []byte, contentLength int64, progress *PartProgress) (*http.Response, error) {
 	var lastErr error
 	for attempt := 1; attempt <= MaxTransientAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resp, err := c.once(ctx, method, path, headers, body, contentLength)
+		resp, err := c.once(ctx, method, path, headers, body, contentLength, progress)
 		if err == nil {
 			return resp, nil
 		}
@@ -321,6 +335,9 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 		if !errors.As(err, &apiErr) || !transient(apiErr) || attempt == MaxTransientAttempts {
 			return nil, err
 		}
+		if progress != nil && progress.Retrying != nil {
+			progress.Retrying()
+		}
 		if err := sleep(ctx, retryDelay(attempt, apiErr.RetryAfter)); err != nil {
 			return nil, err
 		}
@@ -328,7 +345,7 @@ func (c *Client) do(ctx context.Context, method, path string, headers http.Heade
 	return nil, lastErr
 }
 
-func (c *Client) once(ctx context.Context, method, path string, headers http.Header, body []byte, contentLength int64) (*http.Response, error) {
+func (c *Client) once(ctx context.Context, method, path string, headers http.Header, body []byte, contentLength int64, progress *PartProgress) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -343,6 +360,16 @@ func (c *Client) once(ctx context.Context, method, path string, headers http.Hea
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.ContentLength = contentLength
+	if body != nil && progress != nil && progress.Sent != nil {
+		// Counted from zero on every attempt, and on the transport's own
+		// resend over a fresh connection too, which GetBody serves.
+		counted := func() io.ReadCloser {
+			progress.Sent(0)
+			return io.NopCloser(&countingReader{r: bytes.NewReader(body), counted: progress.Sent})
+		}
+		req.Body = counted()
+		req.GetBody = func() (io.ReadCloser, error) { return counted(), nil }
+	}
 	for name, values := range headers {
 		for _, v := range values {
 			req.Header.Add(name, v)
@@ -438,4 +465,21 @@ func newRequestID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	h := hex.EncodeToString(b[:])
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
+}
+
+// countingReader tells how much of a request body the transport has taken,
+// which is about what has gone out: it reads the body as it writes it.
+type countingReader struct {
+	r       io.Reader
+	n       int64
+	counted func(n int64)
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 {
+		c.n += int64(n)
+		c.counted(c.n)
+	}
+	return n, err
 }
