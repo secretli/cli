@@ -151,9 +151,25 @@ type Params struct {
 	// Reusable keeps the link working until it expires; the default is once.
 	Reusable bool
 	Password string
-	// Progress, if set, is told about uploaded bytes. It is never called
+	// Progress, if set, is told how far the upload is. It is never called
 	// from two goroutines at once.
-	Progress func(uploaded, total int64)
+	Progress func(UploadProgress)
+}
+
+// UploadProgress is how far an upload is, in bytes of the encrypted bundle.
+// They nest: Uploaded <= Sent <= Encrypted <= Total.
+type UploadProgress struct {
+	// Total is the whole encrypted bundle, padding included.
+	Total int64
+	// Encrypted is what has been read and encrypted; Total minus it is
+	// still to read.
+	Encrypted int64
+	// Sent is what has gone out, parts still on their way included.
+	Sent int64
+	// Uploaded is what the server has confirmed: parts it has stored.
+	Uploaded int64
+	// Retrying is whether a part failed for a moment and waits to go again.
+	Retrying bool
 }
 
 // Result is a shared secret: its links and what the server confirmed.
@@ -261,29 +277,16 @@ func Share(ctx context.Context, c *api.Client, p Params) (*Result, error) {
 // the server's part size, the last one shorter, a few at a time. Parts are
 // cut wherever chunks begin and end, so their sizes say nothing about the
 // files (FORMAT.md section 9). Only a handful of parts are ever in memory.
-func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan *bundle.StreamPlan, sources []bundle.Source, blobKeys *keys.KeySet, progress func(uploaded, total int64)) (time.Time, error) {
-	stream, err := bundle.NewEncrypter(plan, sources, blobKeys)
+func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan *bundle.StreamPlan, sources []bundle.Source, blobKeys *keys.KeySet, progress func(UploadProgress)) (time.Time, error) {
+	encrypter, err := bundle.NewEncrypter(plan, sources, blobKeys)
 	if err != nil {
 		return time.Time{}, err
 	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(UploadConcurrency)
-	var (
-		mu       sync.Mutex
-		uploaded int64
-	)
-	// Parts finish on their own goroutines; the lock is held through the
-	// callback, so a caller's progress code never runs twice at once.
-	report := func(n int64) {
-		if progress == nil {
-			return
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		uploaded += n
-		progress(uploaded, plan.TotalSize)
-	}
-	report(0)
+	t := &uploadTracker{progress: progress, total: plan.TotalSize, sending: map[int]int64{}, retrying: map[int]bool{}}
+	t.update(func() {})
+	stream := &encryptedCounter{r: encrypter, t: t}
 
 	var offset int64
 	for number := 1; offset < plan.TotalSize; number++ {
@@ -302,10 +305,23 @@ func upload(ctx context.Context, c *api.Client, session *api.UploadSession, plan
 		}
 		partOffset, sum := offset, bundle.SHA256Hex(data)
 		g.Go(func() error {
-			if err := c.UploadPart(gctx, session.ID, session.Token, number, partOffset, data, sum); err != nil {
+			defer t.update(func() { delete(t.sending, number); delete(t.retrying, number) })
+			hooks := &api.PartProgress{
+				Sent: func(n int64) {
+					// An attempt starting over ends the wait to retry.
+					t.update(func() { t.sending[number] = n; delete(t.retrying, number) })
+				},
+				Retrying: func() { t.update(func() { t.sending[number] = 0; t.retrying[number] = true }) },
+			}
+			if err := c.UploadPart(gctx, session.ID, session.Token, number, partOffset, data, sum, hooks); err != nil {
 				return describeUploadError(err)
 			}
-			report(int64(len(data)))
+			// Stored and no longer on its way, in one step, so it never
+			// counts twice.
+			t.update(func() {
+				delete(t.sending, number)
+				t.uploaded += int64(len(data))
+			})
 			return nil
 		})
 		offset += int64(len(data))
@@ -546,4 +562,54 @@ func describeUploadError(err error) error {
 		}
 	}
 	return err
+}
+
+// uploadTracker adds up how far an upload is. Parts move on their own
+// goroutines; the lock is held through the callback, so a caller's progress
+// code never runs twice at once.
+type uploadTracker struct {
+	mu        sync.Mutex
+	progress  func(UploadProgress)
+	total     int64
+	encrypted int64
+	uploaded  int64
+	// sending is what each part on its way has sent of its current attempt.
+	sending  map[int]int64
+	retrying map[int]bool
+}
+
+// update changes the counts under the lock and reports them.
+func (t *uploadTracker) update(change func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	change()
+	if t.progress == nil {
+		return
+	}
+	sent := t.uploaded
+	for _, n := range t.sending {
+		sent += n
+	}
+	t.progress(UploadProgress{
+		Total:     t.total,
+		Encrypted: t.encrypted,
+		Sent:      sent,
+		Uploaded:  t.uploaded,
+		Retrying:  len(t.retrying) > 0,
+	})
+}
+
+// encryptedCounter counts the bundle's bytes as they come out of the
+// encrypter.
+type encryptedCounter struct {
+	r io.Reader
+	t *uploadTracker
+}
+
+func (e *encryptedCounter) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if n > 0 {
+		e.t.update(func() { e.t.encrypted += int64(n) })
+	}
+	return n, err
 }

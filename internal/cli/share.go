@@ -169,8 +169,8 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	}
 	params.Password = password
 
-	bar := e.progress("Encrypting and uploading…")
-	params.Progress = bar.update
+	bar := e.progress("Uploading")
+	params.Progress = bar.stages
 	result, err := share.Share(ctx, e.client(server), params)
 	bar.finish()
 	if err != nil {

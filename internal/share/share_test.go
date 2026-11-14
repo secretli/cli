@@ -107,9 +107,18 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	}
 	var progressCalls int
 	var lastUploaded, lastTotal int64
+	var sentAhead bool
 	result, err := share.Share(ctx, c, share.Params{
 		Files: files, Password: "hunter2", Reusable: true, Expiration: "1h",
-		Progress: func(uploaded, total int64) { progressCalls++; lastUploaded, lastTotal = uploaded, total },
+		Progress: func(p share.UploadProgress) {
+			progressCalls++
+			lastUploaded, lastTotal = p.Uploaded, p.Total
+			if p.Uploaded > p.Sent || p.Sent > p.Encrypted || p.Encrypted > p.Total {
+				t.Errorf("progress does not nest: %+v", p)
+			}
+			// Sending shows before the server confirms a part.
+			sentAhead = sentAhead || p.Sent > p.Uploaded
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -117,8 +126,8 @@ func TestShareFilesWithPasswordInSeveralParts(t *testing.T) {
 	if result.Kind != share.KindFiles || !result.Reusable || !result.PasswordProtected || len(result.Names) != 2 {
 		t.Errorf("result = %+v", result)
 	}
-	if progressCalls < 2 || lastUploaded != lastTotal {
-		t.Errorf("progress: %d calls, ended at %d of %d", progressCalls, lastUploaded, lastTotal)
+	if progressCalls < 2 || lastUploaded != lastTotal || !sentAhead {
+		t.Errorf("progress: %d calls, ended at %d of %d, sent ahead of stored: %v", progressCalls, lastUploaded, lastTotal, sentAhead)
 	}
 	if fake := srv.Fake(); fake != nil {
 		if sizes := fake.PartSizes(); len(sizes) != 3 || sizes[0] != 9*1024*1024 || sizes[1] != 9*1024*1024 || sizes[2]+18*1024*1024 != lastTotal {

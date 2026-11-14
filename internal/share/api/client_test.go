@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -256,5 +257,51 @@ func TestTransferValuesMustBeCanonicalBase64URL(t *testing.T) {
 		if got, err := api.DecodeValue(in); err == nil {
 			t.Errorf("DecodeValue(%q) = %q, want an error", in, got)
 		}
+	}
+}
+
+// A part upload tells how much of its body has gone out, and when it is
+// sent again after a failure, it counts from zero once more.
+func TestUploadPartReportsWhatItSent(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if requests.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"part_number":1}`)
+	}))
+	defer srv.Close()
+
+	data := bytes.Repeat([]byte{7}, 256*1024)
+	var sent []int64
+	retries := 0
+	progress := &api.PartProgress{
+		Sent:     func(n int64) { sent = append(sent, n) },
+		Retrying: func() { retries++ },
+	}
+	if err := api.New(srv.URL).UploadPart(context.Background(), "s", "t", 1, 0, data, "hash", progress); err != nil {
+		t.Fatal(err)
+	}
+	if retries != 1 {
+		t.Errorf("%d retries reported, want 1", retries)
+	}
+	// Two attempts: each starts at zero and ends with the whole body.
+	var starts, ends int
+	for i, n := range sent {
+		if n == 0 {
+			starts++
+		}
+		if n == int64(len(data)) {
+			ends++
+		}
+		if i > 0 && n != 0 && n < sent[i-1] {
+			t.Errorf("went back from %d to %d within an attempt", sent[i-1], n)
+		}
+	}
+	if starts != 2 || ends != 2 {
+		t.Errorf("sent %v: %d starts and %d ends, want 2 of each", sent, starts, ends)
 	}
 }

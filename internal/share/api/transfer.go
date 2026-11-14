@@ -151,7 +151,7 @@ func (c *Client) CloseTransfer(ctx context.Context, transferID, token, reason st
 // longPoll is one GET that the server holds until the leg exists or its
 // window passes; 204 is the window passing, and ok is false then.
 func (c *Client) longPoll(ctx context.Context, path, token string, out any) (bool, error) {
-	resp, err := c.do(ctx, http.MethodGet, path, jsonHeaders(token), nil, 0)
+	resp, err := c.do(ctx, http.MethodGet, path, jsonHeaders(token), nil, 0, nil)
 	if err != nil {
 		return false, err
 	}
