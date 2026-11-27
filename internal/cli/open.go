@@ -25,15 +25,15 @@ type openOptions struct {
 	password     bool
 	passwordFile string
 	yes          bool
-	copy         bool
+	toClipboard  bool
 }
 
 // errNotOpened is a one-time secret the person chose not to open yet.
 var errNotOpened = errors.New("not opened")
 
-// errCopyIsForText is --copy on a secret that holds files, found out
+// errCopyIsForText is --to-clipboard on a secret that holds files, found out
 // before it is opened.
-var errCopyIsForText = errors.New("--copy is for text, and this secret holds files; leave out --copy to save them")
+var errCopyIsForText = errors.New("--to-clipboard is for text, and this secret holds files; leave out --to-clipboard to save them")
 
 func newOpenCmd(e *env) *cobra.Command {
 	var o openOptions
@@ -44,7 +44,7 @@ func newOpenCmd(e *env) *cobra.Command {
 saved to the current directory, or to --out, and never overwrite anything
 unless --force is given. At a terminal, control characters in the text, which
 could steer the terminal, are shown as a replacement character, and you are
-told; --copy, or stdout to a file or pipe, gives the exact text.
+told; --to-clipboard, or stdout to a file or pipe, gives the exact text.
 
 Of a secret with several files, at a terminal, the files are listed and you
 are asked which to save: Enter saves them all, and numbers, ranges and
@@ -53,8 +53,8 @@ the one to write. With --yes or --json, or where there is no terminal to
 ask on, nothing is asked: every file is saved, and --stdout needs a secret
 of a single file.
 
---copy puts text on the clipboard instead, without its final line break,
-so it never shows in the terminal or its scrollback. The clipboard is
+--to-clipboard puts text on the clipboard instead, without its final line
+break, so it never shows in the terminal or its scrollback. The clipboard is
 cleared 45 seconds later, unless something else was copied by then.
 
 Opening a one-time secret is what uses it up, so the link is described first
@@ -66,7 +66,7 @@ scrollback.`,
 		Example: `  secretli open 'https://secretli.app/s#…'
   secretli open 'https://secretli.app/s#…' --out ./received
   secretli open 'https://secretli.app/s#…' --stdout > backup.tgz
-  secretli open 'https://secretli.app/s#…' --copy
+  secretli open 'https://secretli.app/s#…' --to-clipboard
   pbpaste | secretli open`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
@@ -92,24 +92,24 @@ func addOpenFlags(cmd *cobra.Command, o *openOptions) {
 	f.BoolVarP(&o.password, "password", "p", false, "the secret has a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVarP(&o.yes, "yes", "y", false, "open a one-time secret without asking; needed when not at a terminal")
-	f.BoolVarP(&o.copy, "copy", "c", false, "copy text to the clipboard instead of printing it; cleared after 45 seconds")
+	f.BoolVarP(&o.toClipboard, "to-clipboard", "c", false, "copy text to the clipboard instead of printing it; cleared after 45 seconds")
 	_ = cmd.MarkFlagDirname("out")
 }
 
-// checkCopy refuses --copy where it cannot work. It runs before the link or
-// the code is taken, so that nothing is used up for a refusal.
+// checkCopy refuses --to-clipboard where it cannot work. It runs before the
+// link or the code is taken, so that nothing is used up for a refusal.
 func (e *env) checkCopy(o openOptions) error {
-	if !o.copy {
+	if !o.toClipboard {
 		return nil
 	}
 	switch {
 	case o.toStdout:
-		return errors.New("--stdout writes a file and --copy copies text; use one of them")
+		return errors.New("--stdout writes a file and --to-clipboard copies text; use one of them")
 	case e.json:
-		return errors.New("--json prints the secret; leave out --copy")
+		return errors.New("--json prints the secret; leave out --to-clipboard")
 	}
 	if err := clipboard.Available(); err != nil {
-		return fmt.Errorf("--copy: %w", err)
+		return fmt.Errorf("--to-clipboard: %w", err)
 	}
 	return nil
 }
@@ -134,7 +134,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		return err
 	}
 	e.say("%s\n", describeInfo(info, link.IsOwner(), now))
-	if o.copy && info.Kind != share.KindText {
+	if o.toClipboard && info.Kind != share.KindText {
 		return errCopyIsForText
 	}
 	if !info.Reusable && !o.yes {
@@ -158,7 +158,7 @@ func (e *env) openLink(ctx context.Context, o openOptions, link share.Link) erro
 		opened, err := share.Open(ctx, c, link, password, sink, bar.update)
 		bar.finish()
 		if err == nil {
-			return e.printOpened(opened, sink, o.copy)
+			return e.printOpened(opened, sink, o.toClipboard)
 		}
 		// A mistyped password doesn't use the secret up, but the server
 		// counts it, and at the last one it takes deletes the secret. Ask
@@ -450,7 +450,7 @@ func (e *env) writeText(text []byte) error {
 	}
 	if changed {
 		// Even with --quiet: what was printed is not quite the secret.
-		_, _ = fmt.Fprint(e.stderr, "The secret holds control characters, shown as \uFFFD; --copy, or stdout to a file or pipe, gives the exact text.\n")
+		_, _ = fmt.Fprint(e.stderr, "The secret holds control characters, shown as \uFFFD; --to-clipboard, or stdout to a file or pipe, gives the exact text.\n")
 	}
 	return nil
 }
