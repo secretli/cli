@@ -26,7 +26,7 @@ type shareOptions struct {
 	reusable      bool
 	password      bool
 	qr            bool
-	toClipboard   bool
+	copyLink      bool
 	fromClipboard bool
 	code          bool
 }
@@ -70,7 +70,7 @@ short code instead of printing it, as secretli send does.`,
 	f.BoolVarP(&o.password, "password", "p", false, "protect the secret with a password (asked for, or SECRETLI_PASSWORD)")
 	f.StringVar(&o.passwordFile, "password-file", "", "read the password from the first line of this file")
 	f.BoolVar(&o.qr, "qr", false, "show the link as a QR code too")
-	f.BoolVarP(&o.toClipboard, "to-clipboard", "c", false, "copy the link to the clipboard; cleared after 45 seconds")
+	f.BoolVarP(&o.copyLink, "copy-link", "c", false, "copy the link to the clipboard; cleared after 45 seconds")
 	f.BoolVar(&o.fromClipboard, "from-clipboard", false, "share the clipboard's text, without its final line break")
 	f.BoolVar(&o.code, "code", false, "hand the link to another device with a short code instead of printing it")
 	return cmd
@@ -80,8 +80,8 @@ func (e *env) share(ctx context.Context, o shareOptions, args []string) error {
 	if !share.ValidExpiration(o.expires) {
 		return fmt.Errorf("--expires must be one of %s", strings.Join(share.Expirations, ", "))
 	}
-	if o.code && (o.qr || o.toClipboard) {
-		return errors.New("--code hands the link over itself; leave out --qr and --to-clipboard")
+	if o.code && (o.qr || o.copyLink) {
+		return errors.New("--code hands the link over itself; leave out --qr and --copy-link")
 	}
 	// Before anything is read or uploaded: the link has to be one that
 	// opens, which rules out http to another machine.
@@ -265,7 +265,7 @@ func (e *env) printShared(r *share.Result, o shareOptions) error {
 			e.note("Couldn't draw the QR code: %v\n", err)
 		}
 	}
-	if o.toClipboard {
+	if o.copyLink {
 		// The link is printed below anyway, so a failure needs no stand-in.
 		if err := e.copyAndClear(link, "the link"); err != nil {
 			e.note("Couldn't copy to the clipboard: %v\n", err)
