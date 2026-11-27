@@ -12,7 +12,7 @@ import (
 // what was printed, retitle the window, show a link that leads elsewhere,
 // or set the clipboard. Format characters such as U+202E reverse text on
 // display: invoice, U+202E, txt.exe reads as invoiceexe.txt. Pipes, files,
-// --to-clipboard and --json get the text as it is.
+// --clipboard and --json get the text as it is.
 
 // printable is a file's name as the terminal may show it: control and
 // format characters, and bytes that aren't UTF-8, become '?'.

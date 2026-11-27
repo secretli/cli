@@ -16,7 +16,8 @@ import (
 )
 
 func newSendCmd(e *env) *cobra.Command {
-	return &cobra.Command{
+	var fromClipboard bool
+	cmd := &cobra.Command{
 		Use:   "send [link]",
 		Short: "Hand a link to another device with a short code",
 		Long: `Hands a link to another device with a short code like 7-acid-rocket, so
@@ -32,12 +33,19 @@ Prints the code and waits until the link was handed over. Without an
 argument the link is read from stdin, or asked for at a terminal without
 showing it.`,
 		Example: `  secretli send 'https://secretli.app/s#…'
+  secretli send -c                         the link from the clipboard
   secretli share notes.txt -q | secretli send`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			link, err := e.linkArg(ctx, args)
+			if err := checkClipboard(fromClipboard); err != nil {
+				return err
+			}
+			link, err := e.linkArg(ctx, args, fromClipboard)
+			if errors.Is(err, errNoLinkOnClipboard) {
+				return fmt.Errorf("%w; to hand over the clipboard's text, use secretli share -c --code", err)
+			}
 			if err != nil {
 				return err
 			}
@@ -47,6 +55,8 @@ showing it.`,
 			return e.handOver(ctx, link.Recipient(), nil)
 		}),
 	}
+	cmd.Flags().BoolVarP(&fromClipboard, "clipboard", "c", false, "take the link from the clipboard instead of asking for it")
+	return cmd
 }
 
 // handOver sends a link with a code and waits until it was handed over.

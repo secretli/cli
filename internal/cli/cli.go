@@ -123,7 +123,9 @@ Links from this command open in the web app and the other way round.`,
   secretli status <link>               what a link points to, without opening it
   secretli delete <owner-link>         remove a secret for everyone
   secretli send <link>                 hand a link to another device with a short code
-  secretli receive 7-acid-rocket       open what another device sends with a code`,
+  secretli receive 7-acid-rocket       open what another device sends with a code
+  secretli share -c --code             the clipboard's text, handed over with a code
+  secretli receive 7-acid-rocket -c    and on the other device, back onto the clipboard`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version(),

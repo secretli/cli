@@ -12,6 +12,7 @@ import (
 )
 
 func newStatusCmd(e *env) *cobra.Command {
+	var fromClipboard bool
 	cmd := &cobra.Command{
 		Use:   "status [link]",
 		Short: "Say what a link points to, without opening it",
@@ -24,13 +25,15 @@ about it, so status says only that it is gone, as it does for a link to
 nothing. The exit code is 4 then, so scripts can tell, and with --json the
 state is always live or gone.`,
 		Example: `  secretli status 'https://secretli.app/s#…!…'
-  secretli status "$LINK" --json | jq -r .state`,
+  secretli status "$LINK" --json | jq -r .state
+  secretli status -c                       the link from the clipboard`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
-			return e.status(cmd.Context(), args)
+			return e.status(cmd.Context(), args, fromClipboard)
 		}),
 	}
+	cmd.Flags().BoolVarP(&fromClipboard, "clipboard", "c", false, "take the link from the clipboard instead of asking for it")
 	return cmd
 }
 
@@ -39,8 +42,11 @@ type exitWith struct{ code int }
 
 func (x *exitWith) Error() string { return "" }
 
-func (e *env) status(ctx context.Context, args []string) error {
-	link, err := e.linkArg(ctx, args)
+func (e *env) status(ctx context.Context, args []string, fromClipboard bool) error {
+	if err := checkClipboard(fromClipboard); err != nil {
+		return err
+	}
+	link, err := e.linkArg(ctx, args, fromClipboard)
 	if err != nil {
 		return err
 	}

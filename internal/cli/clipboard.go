@@ -22,7 +22,7 @@ const clipboardClearAfter = 45 * time.Second
 // clipboardTool is the desktop's clipboard.
 type clipboardTool interface {
 	// Available fails when there is no clipboard to copy to, so that
-	// --to-clipboard is refused before anything is opened.
+	// --clipboard is refused before anything is opened.
 	Available() error
 	Copy(text string) error
 	Paste() (string, error)
