@@ -572,3 +572,109 @@ func TestTerminalCtrlCDuringADownload(t *testing.T) {
 		t.Errorf("the progress line was not cleared before the error; the terminal was sent %q", raw)
 	}
 }
+
+// At a terminal, --clipboard stands in for it: what would be typed comes
+// from the clipboard, what would be read goes there, and neither shows.
+// This is the way across: share -c --code on one computer, receive <code>
+// -c on the other.
+func TestTerminalClipboard(t *testing.T) {
+	srv := fakeServer(t)
+	server := "--server=" + srv.URL
+	dir := t.TempDir()
+	write := func(path, text string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(path string) string {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	at := func(clip string, args ...string) *atTerminal {
+		t.Helper()
+		return startAtTerminalWith(t, terminalSetup{env: []string{testClipboard + "=" + clip}}, args...)
+	}
+	clipA, clipB := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+
+	// Computer A: the clipboard's text, handed over with a code, which is
+	// shown, since it is there to be typed. Nothing asks for the secret.
+	write(clipA, "hunter2\n")
+	a := at(clipA, "share", "-c", "--code", server)
+	a.expect("Waiting for the other device.")
+	m := regexp.MustCompile(`secretli receive (\S+)`).FindStringSubmatch(a.screen())
+	if m == nil {
+		t.Fatalf("no code; the terminal shows:\n%s", a.screen())
+	}
+	if strings.Contains(a.screen(), "Type or paste") || strings.Contains(a.screen(), "hunter2") {
+		t.Errorf("share asked for or showed the secret:\n%s", a.screen())
+	}
+
+	// Computer B: the code is typed, never taken from the clipboard, and
+	// the secret goes onto the clipboard.
+	write(clipB, "7-acid-rocket")
+	b := at(clipB, "receive", m[1], "-c", server)
+	b.expect("[y/N] ")
+	b.typ("y\r")
+	b.expect("Copied the secret to the clipboard")
+	if code := b.exitCode(); code != 0 {
+		t.Fatalf("receive: exit %d; the terminal shows:\n%s", code, b.screen())
+	}
+	if code := a.exitCode(); code != 0 {
+		t.Fatalf("share: exit %d; the terminal shows:\n%s", code, a.screen())
+	}
+	if got := read(clipB); got != "hunter2" {
+		t.Errorf("clipboard on B = %q", got)
+	}
+	if strings.Contains(b.screen(), "hunter2") {
+		t.Errorf("receive showed the secret:\n%s", b.screen())
+	}
+
+	// share -c and open -c on one computer: the link goes on the clipboard
+	// instead of the screen, and open takes it from there instead of asking.
+	write(clipA, "round trip")
+	a = at(clipA, "share", "-c", server)
+	a.expect("Your link is on the clipboard.")
+	if code := a.exitCode(); code != 0 {
+		t.Fatalf("share -c: exit %d; the terminal shows:\n%s", code, a.screen())
+	}
+	// The owner link, printed as ever, begins with it; the link to hand out
+	// is not printed on a line of its own.
+	link := read(clipA)
+	if !strings.Contains(link, "/s#") || strings.Contains(a.screen(), link+"\r\n") {
+		t.Errorf("clipboard %q; the terminal shows:\n%s", link, a.screen())
+	}
+	o := at(clipA, "open", "-c")
+	o.expect("[y/N] ")
+	o.typ("y\r")
+	o.expect("Copied the secret to the clipboard")
+	if code := o.exitCode(); code != 0 {
+		t.Fatalf("open -c: exit %d; the terminal shows:\n%s", code, o.screen())
+	}
+	if got := read(clipA); got != "round trip" {
+		t.Errorf("clipboard after open -c = %q", got)
+	}
+	if strings.Contains(o.screen(), "Paste the link") || strings.Contains(o.screen(), "round trip") {
+		t.Errorf("open asked for the link or showed the secret:\n%s", o.screen())
+	}
+
+	// A clipboard without a link: refused, and what it holds isn't shown.
+	write(clipA, "s3cret-not-a-link")
+	for _, args := range [][]string{{"open", "-c"}, {"status", "-c"}, {"delete", "-c"}, {"send", "-c"}} {
+		c := at(clipA, args...)
+		c.expect("the clipboard holds no Secretli link")
+		if code := c.exitCode(); code != ExitError {
+			t.Errorf("%v: exit %d", args, code)
+		}
+		if strings.Contains(c.screen(), "s3cret") {
+			t.Errorf("%v shows the clipboard:\n%s", args, c.screen())
+		}
+		if args[0] == "send" && !strings.Contains(c.screen(), "secretli share -c --code") {
+			t.Errorf("send gives no hint:\n%s", c.screen())
+		}
+	}
+}

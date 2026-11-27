@@ -29,8 +29,9 @@ func newReceiveCmd(e *env) *cobra.Command {
 		Long: `Receives a link that another device hands over with a short code, from
 secretli send or from "Send with a code" in the web app, and opens it like
 secretli open: text to stdout, files to the current directory or --out.
---link prints the link instead of opening it. --to-clipboard puts the text,
-or with --link the link, on the clipboard instead, as with open.
+--link prints the link instead of opening it. --clipboard puts the text, or
+with --link the link, on the clipboard instead, as with open; the code is
+never taken from the clipboard.
 
 A one-time secret is described and you are asked before it is opened, as
 with open; --yes opens it without asking. Answering no prints the link,
@@ -43,7 +44,8 @@ Without an argument the code is read from stdin, or asked for at a terminal
 without showing it. A misspelt word is caught before the code is used.`,
 		Example: `  secretli receive 7-acid-rocket
   secretli receive 7 acid rocket --out ./received
-  secretli receive 7-acid-rocket --link`,
+  secretli receive 7-acid-rocket --link
+  secretli receive 7-acid-rocket -c        the text to the clipboard`,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: run(func(cmd *cobra.Command, args []string) error {
@@ -51,6 +53,7 @@ without showing it. A misspelt word is caught before the code is used.`,
 		}),
 	}
 	addOpenFlags(cmd, &o.openOptions)
+	cmd.Flags().Lookup("clipboard").Usage = "the text, or with --link the link, to the clipboard instead of the terminal"
 	cmd.Flags().BoolVar(&o.linkOnly, "link", false, "print the link instead of opening it")
 	return cmd
 }
@@ -61,7 +64,7 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 	if !o.yes && !o.linkOnly && !e.canAsk() {
 		return errors.New("receive asks before it opens a one-time secret, and there is no terminal to ask on; use --yes to open it anyway, or --link to print the link")
 	}
-	if err := e.checkCopy(o.openOptions); err != nil {
+	if err := checkClipboard(o.clipboard); err != nil {
 		return err
 	}
 	server, err := share.Origin(e.server)
@@ -85,7 +88,7 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 		return fmt.Errorf("the code delivered a link for another server, %s; it was not opened", link.Origin)
 	}
 	if o.linkOnly {
-		if o.toClipboard {
+		if o.clipboard {
 			return e.copySecret(link.String(), "the link")
 		}
 		return e.printLink(link)
@@ -96,8 +99,6 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 	switch {
 	case errors.Is(err, errNotOpened):
 		e.note("Not opened. Here is the link, which still works:\n")
-	case errors.Is(err, errCopyIsForText):
-		e.note("Not opened: %v. Here is the link, which still works:\n", err)
 	default:
 		return err
 	}
