@@ -94,7 +94,7 @@ func TestOpenCopiesTheSecretInsteadOfPrintingIt(t *testing.T) {
 	cb := fakeClipboard(t)
 	link, _ := shareText(t, "--server="+srv.URL, "hunter2\n")
 
-	stdout, stderr, code := runCLI(t, "", "open", link, "--copy", "--yes")
+	stdout, stderr, code := runCLI(t, "", "open", link, "--to-clipboard", "--yes")
 	if code != 0 || stdout != "" {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
@@ -112,12 +112,12 @@ func TestOpenCopiesTheSecretInsteadOfPrintingIt(t *testing.T) {
 	}
 }
 
-// The link carries the key, so share --copy has it cleared like open --copy.
+// The link carries the key, so share --to-clipboard has it cleared like open --to-clipboard.
 func TestShareCopiesTheLinkAndClearsItLater(t *testing.T) {
 	srv := fakeServer(t)
 	cb := fakeClipboard(t)
 
-	stdout, stderr, code := runCLI(t, "the launch code", "share", "--server="+srv.URL, "--copy")
+	stdout, stderr, code := runCLI(t, "the launch code", "share", "--server="+srv.URL, "--to-clipboard")
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
@@ -134,8 +134,8 @@ func TestShareCopiesTheLinkAndClearsItLater(t *testing.T) {
 	}
 }
 
-// --paste shares the clipboard's text, and with --copy the link takes its
-// place there: what open --copy gives back is what was pasted.
+// --from-clipboard shares the clipboard's text, and with --to-clipboard the link takes its
+// place there: what open --to-clipboard gives back is what was pasted.
 func TestSharePastesTheClipboard(t *testing.T) {
 	srv := fakeServer(t)
 	server := "--server=" + srv.URL
@@ -143,7 +143,7 @@ func TestSharePastesTheClipboard(t *testing.T) {
 
 	// The paste tool's own line break is not part of the secret.
 	cb.text, cb.pasteSuffix = "hunter2", "\r\n"
-	stdout, stderr, code := runCLI(t, "ignored", "share", server, "--paste", "--copy")
+	stdout, stderr, code := runCLI(t, "ignored", "share", server, "--from-clipboard", "--to-clipboard")
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
@@ -158,7 +158,7 @@ func TestSharePastesTheClipboard(t *testing.T) {
 
 	// With --name, the clipboard is shared as a file.
 	cb.text = "A=1\nB=2\n"
-	link, _ = shareText(t, server, "", "--paste", "--name", ".env")
+	link, _ = shareText(t, server, "", "--from-clipboard", "--name", ".env")
 	dir := t.TempDir()
 	if _, stderr, code := runCLI(t, "", "open", link, "--yes", "--out", dir); code != 0 {
 		t.Fatalf("open file: exit %d, stderr %q", code, stderr)
@@ -179,18 +179,18 @@ func TestPasteIsRefusedBeforeAnythingIsUploaded(t *testing.T) {
 
 	cb.text = "x"
 	for _, args := range [][]string{{"-t", "y"}, {file}, {"-"}} {
-		if _, stderr, code := runCLI(t, "", append([]string{"share", server, "--paste"}, args...)...); code != ExitError || !strings.Contains(stderr, "--paste shares the clipboard; leave out --text and files") {
+		if _, stderr, code := runCLI(t, "", append([]string{"share", server, "--from-clipboard"}, args...)...); code != ExitError || !strings.Contains(stderr, "--from-clipboard shares the clipboard; leave out --text and files") {
 			t.Errorf("%v: exit %d, stderr %q", args, code, stderr)
 		}
 	}
 
 	cb.text = "\n"
-	if _, stderr, code := runCLI(t, "", "share", server, "--paste"); code != ExitError || !strings.Contains(stderr, "--paste: the clipboard holds no text") {
+	if _, stderr, code := runCLI(t, "", "share", server, "--from-clipboard"); code != ExitError || !strings.Contains(stderr, "--from-clipboard: the clipboard holds no text") {
 		t.Errorf("empty clipboard: exit %d, stderr %q", code, stderr)
 	}
 
 	clipboard = noClipboard{}
-	if _, stderr, code := runCLI(t, "", "share", server, "--paste"); code != ExitError || !strings.Contains(stderr, "--paste: no clipboard tool found") {
+	if _, stderr, code := runCLI(t, "", "share", server, "--from-clipboard"); code != ExitError || !strings.Contains(stderr, "--from-clipboard: no clipboard tool found") {
 		t.Errorf("no clipboard: exit %d, stderr %q", code, stderr)
 	}
 }
@@ -205,11 +205,11 @@ func TestCopyIsRefusedBeforeAnythingIsUsedUp(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"--stdout"}, "--stdout writes a file and --copy copies text"},
-		{[]string{"--json"}, "--json prints the secret; leave out --copy"},
+		{[]string{"--stdout"}, "--stdout writes a file and --to-clipboard copies text"},
+		{[]string{"--json"}, "--json prints the secret; leave out --to-clipboard"},
 	} {
 		// With --json, the error is JSON on stdout.
-		stdout, stderr, code := runCLI(t, "", append([]string{"open", link, "--copy", "--yes"}, tc.args...)...)
+		stdout, stderr, code := runCLI(t, "", append([]string{"open", link, "--to-clipboard", "--yes"}, tc.args...)...)
 		if code != ExitError || !strings.Contains(stdout+stderr, tc.want) {
 			t.Errorf("%v: exit %d, stdout %q, stderr %q", tc.args, code, stdout, stderr)
 		}
@@ -217,7 +217,7 @@ func TestCopyIsRefusedBeforeAnythingIsUsedUp(t *testing.T) {
 
 	// No clipboard tool: refused before the link is even read.
 	clipboard = noClipboard{}
-	if _, stderr, code := runCLI(t, "", "open", link, "--copy", "--yes"); code != ExitError || !strings.Contains(stderr, "--copy: no clipboard tool found") {
+	if _, stderr, code := runCLI(t, "", "open", link, "--to-clipboard", "--yes"); code != ExitError || !strings.Contains(stderr, "--to-clipboard: no clipboard tool found") {
 		t.Errorf("no clipboard: exit %d, stderr %q", code, stderr)
 	}
 	clipboard = cb
@@ -229,7 +229,7 @@ func TestCopyIsRefusedBeforeAnythingIsUsedUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	fileLink, _ := shareText(t, server, "", notes)
-	if _, stderr, code := runCLI(t, "", "open", fileLink, "--copy", "--yes"); code != ExitError || !strings.Contains(stderr, "--copy is for text, and this secret holds files") {
+	if _, stderr, code := runCLI(t, "", "open", fileLink, "--to-clipboard", "--yes"); code != ExitError || !strings.Contains(stderr, "--to-clipboard is for text, and this secret holds files") {
 		t.Errorf("files: exit %d, stderr %q", code, stderr)
 	}
 
@@ -249,7 +249,7 @@ func TestACopyThatFailsPrintsTheSecretAfterAll(t *testing.T) {
 	link, _ := shareText(t, "--server="+srv.URL, "hunter2\n")
 
 	// The one-time secret is used up by then, so this is the only copy.
-	stdout, stderr, code := runCLI(t, "", "open", link, "--copy", "--yes")
+	stdout, stderr, code := runCLI(t, "", "open", link, "--to-clipboard", "--yes")
 	if code != 0 || stdout != "hunter2\n" || !strings.Contains(stderr, "Couldn't copy to the clipboard (xclip: exit status 1), so here it is:") {
 		t.Errorf("exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
@@ -272,7 +272,7 @@ func TestReceiveCopies(t *testing.T) {
 	}
 
 	link, _ := shareText(t, server, "handed over\n")
-	if stdout, stderr, code := receive(link, "--copy", "--yes"); code != 0 || stdout != "" {
+	if stdout, stderr, code := receive(link, "--to-clipboard", "--yes"); code != 0 || stdout != "" {
 		t.Errorf("text: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	if text, _ := cb.state(); text != "handed over" {
@@ -281,7 +281,7 @@ func TestReceiveCopies(t *testing.T) {
 
 	// With --link, the link is what goes on the clipboard.
 	link, _ = shareText(t, server, "a link\n")
-	if stdout, stderr, code := receive(link, "--copy", "--link"); code != 0 || stdout != "" || !strings.Contains(stderr, "Copied the link") {
+	if stdout, stderr, code := receive(link, "--to-clipboard", "--link"); code != 0 || stdout != "" || !strings.Contains(stderr, "Copied the link") {
 		t.Errorf("link: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	if text, _ := cb.state(); text != link {
@@ -296,8 +296,8 @@ func TestReceiveCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	fileLink, _ := shareText(t, server, "", notes)
-	stdout, stderr, code := receive(fileLink, "--copy", "--yes")
-	if code != ExitError || strings.TrimSpace(stdout) != fileLink || !strings.Contains(stderr, "Not opened: --copy is for text") || !strings.Contains(stderr, "Here is the link, which still works") {
+	stdout, stderr, code := receive(fileLink, "--to-clipboard", "--yes")
+	if code != ExitError || strings.TrimSpace(stdout) != fileLink || !strings.Contains(stderr, "Not opened: --to-clipboard is for text") || !strings.Contains(stderr, "Here is the link, which still works") {
 		t.Errorf("files: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	if _, stderr, code := runCLI(t, "", "open", fileLink, "--yes", "--out", filepath.Join(dir, "received")); code != 0 {
@@ -372,7 +372,7 @@ func TestTabCompletion(t *testing.T) {
 		}
 	}
 
-	// The command behind --copy's clearing stays out of sight.
+	// The command behind --to-clipboard's clearing stays out of sight.
 	if stdout, _, _ := runCLI(t, "", "--help"); strings.Contains(stdout, "clear-clipboard") {
 		t.Errorf("help lists clear-clipboard: %q", stdout)
 	}

@@ -29,8 +29,8 @@ func newReceiveCmd(e *env) *cobra.Command {
 		Long: `Receives a link that another device hands over with a short code, from
 secretli send or from "Send with a code" in the web app, and opens it like
 secretli open: text to stdout, files to the current directory or --out.
---link prints the link instead of opening it. --copy puts the text, or with
---link the link, on the clipboard instead, as with open.
+--link prints the link instead of opening it. --to-clipboard puts the text,
+or with --link the link, on the clipboard instead, as with open.
 
 A one-time secret is described and you are asked before it is opened, as
 with open; --yes opens it without asking. Answering no prints the link,
@@ -85,7 +85,7 @@ func (e *env) receive(ctx context.Context, o receiveOptions, args []string) erro
 		return fmt.Errorf("the code delivered a link for another server, %s; it was not opened", link.Origin)
 	}
 	if o.linkOnly {
-		if o.copy {
+		if o.toClipboard {
 			return e.copySecret(link.String(), "the link")
 		}
 		return e.printLink(link)
