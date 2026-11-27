@@ -112,12 +112,13 @@ func TestOpenCopiesTheSecretInsteadOfPrintingIt(t *testing.T) {
 	}
 }
 
-// The link carries the key, so share --to-clipboard has it cleared like open --to-clipboard.
+// The link carries the key, so share --copy-link has it cleared like open
+// --to-clipboard.
 func TestShareCopiesTheLinkAndClearsItLater(t *testing.T) {
 	srv := fakeServer(t)
 	cb := fakeClipboard(t)
 
-	stdout, stderr, code := runCLI(t, "the launch code", "share", "--server="+srv.URL, "--to-clipboard")
+	stdout, stderr, code := runCLI(t, "the launch code", "share", "--server="+srv.URL, "--copy-link")
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
@@ -134,8 +135,9 @@ func TestShareCopiesTheLinkAndClearsItLater(t *testing.T) {
 	}
 }
 
-// --from-clipboard shares the clipboard's text, and with --to-clipboard the link takes its
-// place there: what open --to-clipboard gives back is what was pasted.
+// --from-clipboard shares the clipboard's text, and with --copy-link the
+// link takes its place there: what open --to-clipboard gives back is what
+// was pasted.
 func TestSharePastesTheClipboard(t *testing.T) {
 	srv := fakeServer(t)
 	server := "--server=" + srv.URL
@@ -143,7 +145,7 @@ func TestSharePastesTheClipboard(t *testing.T) {
 
 	// The paste tool's own line break is not part of the secret.
 	cb.text, cb.pasteSuffix = "hunter2", "\r\n"
-	stdout, stderr, code := runCLI(t, "ignored", "share", server, "--from-clipboard", "--to-clipboard")
+	stdout, stderr, code := runCLI(t, "ignored", "share", server, "--from-clipboard", "--copy-link")
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}

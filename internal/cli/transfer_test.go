@@ -165,7 +165,7 @@ func TestReceiveRefusesBadCodes(t *testing.T) {
 		{[]string{"receive", "7-acid-rocket", server, "--yes"}, ExitGone, "no transfer with that number"},
 		{[]string{"receive", "acid-rocket", server, "--yes"}, ExitError, "codes look like 7-acid-rocket"},
 		{[]string{"receive", "7-acid-rokcet", server, "--yes"}, ExitError, `"rokcet" isn't a code word`},
-		{[]string{"share", "-t", "x", "--code", "--qr", server}, ExitError, "leave out --qr and --to-clipboard"},
+		{[]string{"share", "-t", "x", "--code", "--qr", server}, ExitError, "leave out --qr and --copy-link"},
 	} {
 		_, stderr, code := runCLI(t, "", c.args...)
 		if code != c.exit || !strings.Contains(stderr, c.says) {
